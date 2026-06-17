@@ -1,0 +1,20 @@
+/** A pure deterministic PRNG. Never use Math.random in engine logic. */
+export function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a |= 0;
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+/** Derive a new 32-bit seed from a base seed and a string label (FNV-1a mix). */
+export function deriveSeed(base, label) {
+    let h = (base >>> 0) ^ 0x811c9dc5;
+    for (let i = 0; i < label.length; i++) {
+        h ^= label.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+}
