@@ -21,6 +21,7 @@ Every later unit depends on this one being correct, and this unit needs zero ext
 — it is entirely TDD-able offline.
 
 ### Critical architecture rule (applies to the whole project, set up here)
+
 Poker is **fully server-authoritative**. The shared engine is pure `(state, action) -> newState`,
 but only the future PartyKit server ever runs the mutating transitions on the real (secret) deck.
 The engine in this unit must be written so that secret state (deck, seed, foreign hole cards) is
@@ -31,6 +32,7 @@ cleanly separable and redactable.
 ## 2. Scope & boundary
 
 **In scope (this unit):**
+
 - npm-workspaces monorepo scaffold with TS/Vitest/ESLint/Prettier tooling.
 - The complete pure engine in `shared/`: cards, deck, hand evaluation, betting state machine,
   pots/showdown, redaction selector, pairwise Elo, bot policy, protocol shell.
@@ -39,11 +41,12 @@ cleanly separable and redactable.
 - All of it TDD'd; the two property tests are release gates.
 
 **Explicitly NOT in scope (later units):**
+
 - PartyKit `MatchRoom` / `LobbyRoom`, timers, bot runner, match loop.
 - Supabase schema, RLS, `report-match` edge function.
 - React client / SVG table / routes.
 - Matchmaking, deploy.
-- Real antes (see §5), puzzles, GTO solver, wingman/2v2 format (only *structurally* allowed for).
+- Real antes (see §5), puzzles, GTO solver, wingman/2v2 format (only _structurally_ allowed for).
 
 ---
 
@@ -79,6 +82,7 @@ All poker numbers live here ONCE. Nothing poker-numeric is hardcoded anywhere el
 server, edge function all import from here in later units).
 
 **Shared constants:**
+
 - `TABLE_SIZE = 6`
 - `STARTING_STACK = 1000`
 - `ELO_DEFAULT_RATING = 400`, `ELO_K_FACTOR = 24`, provisional K `= 48`, provisional-games
@@ -104,22 +108,22 @@ unit, auto-checks if legal else folds). `blindLevelDurationMs` boundaries are ex
 clock passes the last level boundary. Start stack $1000 = 50 BB at level 1, ~10 BB at the top.
 Match length is a hard cap (per "Timers are hard limits" above).
 
-| Format | Match length (hard cap) | Level len | Turn timer | Blind ladder (SB/BB) |
-|---|---|---|---|---|
-| **rapid** | 5 min | 60s | 15s | 10/20 → 15/30 → 25/50 → 40/80 → 50/100 |
-| **turbo** *(default)* | 10 min | 120s | 20s | 10/20 → 15/30 → 20/40 → 30/60 → 50/100 |
-| **long** | 20 min | 180s | 25s | 10/20 → 15/30 → 20/40 → 30/60 → 40/80 → 50/100 → 75/150 |
+| Format                | Match length (hard cap) | Level len | Turn timer | Blind ladder (SB/BB)                                    |
+| --------------------- | ----------------------- | --------- | ---------- | ------------------------------------------------------- |
+| **rapid**             | 5 min                   | 60s       | 15s        | 10/20 → 15/30 → 25/50 → 40/80 → 50/100                  |
+| **turbo** _(default)_ | 10 min                  | 120s      | 20s        | 10/20 → 15/30 → 20/40 → 30/60 → 50/100                  |
+| **long**              | 20 min                  | 180s      | 25s        | 10/20 → 15/30 → 20/40 → 30/60 → 40/80 → 50/100 → 75/150 |
 
 **Rank tiers** (`RANK_TIERS`, display only; subject to change):
 
-| Rank | Rating range |
-|---|---|
-| Fish | 0 – 500 |
-| Limper | 500 – 750 |
-| Grinder | 750 – 1000 |
-| Shark | 1000 – 1300 |
-| Semi-Pro | 1300 – 1750 |
-| Final Tablist | 1750+ |
+| Rank          | Rating range |
+| ------------- | ------------ |
+| Fish          | 0 – 500      |
+| Limper        | 500 – 750    |
+| Grinder       | 750 – 1000   |
+| Shark         | 1000 – 1300  |
+| Semi-Pro      | 1300 – 1750  |
+| Final Tablist | 1750+        |
 
 New players start at **400** (top of Fish, just below Limper). Ranks are pure presentation derived
 from rating; the engine/Elo math doesn't depend on them.
@@ -211,10 +215,11 @@ reopening behavior, button rotation past busted seats.
 A discriminated-union message protocol, `encode`/`decode` helpers. **`decode` validates the tag
 only**; full payload re-validation is the future server's job (security-critical there). Message
 types are stubbed so later units extend the union rather than reinvent it:
+
 - `ClientMsg`: `hello` (jwt) / `action` / `sitOut` / `ping`.
 - `ServerMsg`: `seated` / `dealPrivate` / `snapshot` (redacted) / `event` / `yourTurn`
   (legal mask + deadline) / `matchOver` / `error`.
-A round-trip test (encode→decode preserves tag + shape) is the only protocol test in this unit.
+  A round-trip test (encode→decode preserves tag + shape) is the only protocol test in this unit.
 
 ---
 
@@ -247,5 +252,6 @@ A round-trip test (encode→decode preserves tag + shape) is the only protocol t
 ---
 
 ## 11. Out of scope / deferred (tracked, not built here)
+
 Server rooms, timers, bot runner; Supabase schema/RLS/edge function; React UI; matchmaking;
 deploy; real antes; wingman/2v2 (structurally allowed for only); spectating; puzzles; GTO solver.

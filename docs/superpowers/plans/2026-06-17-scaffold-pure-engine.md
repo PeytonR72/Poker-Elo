@@ -9,6 +9,7 @@
 **Tech Stack:** TypeScript (strict, `noUncheckedIndexedAccess`, `moduleResolution: Bundler`, `.js` import specifiers), npm workspaces, Vitest, ESLint, Prettier.
 
 **Conventions (every task follows these):**
+
 - Relative imports end in `.js` even though sources are `.ts` (e.g. `import { mulberry32 } from "./rng.js"`).
 - Tests are colocated: `src/foo.ts` → `src/foo.test.ts`.
 - Run tests from the repo root with `npm test` (Vitest workspace). Run a single file with `npm test -- src/path/file.test.ts`.
@@ -67,6 +68,7 @@ supabase/ .gitkeep
 ## Task 1: Root monorepo scaffold
 
 **Files:**
+
 - Create: `package.json`
 - Create: `tsconfig.base.json`
 - Create: `.prettierrc.json`
@@ -161,6 +163,7 @@ git add -A && git commit -m "chore: root monorepo scaffold (workspaces, tsconfig
 ## Task 2: ESLint flat config
 
 **Files:**
+
 - Create: `eslint.config.js`
 
 - [ ] **Step 1: Create `eslint.config.js`**
@@ -198,6 +201,7 @@ git add -A && git commit -m "chore: eslint flat config"
 ## Task 3: `shared` workspace package
 
 **Files:**
+
 - Create: `shared/package.json`
 - Create: `shared/tsconfig.json`
 - Create: `shared/src/index.ts`
@@ -273,6 +277,7 @@ git add -A && git commit -m "chore: @poker/shared workspace with passing smoke t
 ## Task 4: `rng.ts` — mulberry32 + deriveSeed
 
 **Files:**
+
 - Create: `shared/src/rng.ts`
 - Test: `shared/src/rng.test.ts`
 
@@ -370,6 +375,7 @@ git add -A && git commit -m "feat(shared): deterministic rng (mulberry32 + deriv
 ## Task 5: `roomCode.ts` — match codes
 
 **Files:**
+
 - Create: `shared/src/roomCode.ts`
 - Test: `shared/src/roomCode.test.ts`
 
@@ -438,6 +444,7 @@ git add -A && git commit -m "feat(shared): room code generation"
 ## Task 6: `constants.ts` + living `CLAUDE.md`
 
 **Files:**
+
 - Create: `shared/src/constants.ts`
 - Test: `shared/src/constants.test.ts`
 - Create: `CLAUDE.md`
@@ -682,6 +689,7 @@ PokerElo is a ranked, no-real-money web poker app (play for ELO). Flagship: 6-ma
 No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 
 ## Golden rules (NON-NEGOTIABLE)
+
 1. **All poker numbers live in `shared/src/constants.ts` ONCE.** Never hardcode a poker-numeric
    value (stack, blind, timer, K-factor, table size) anywhere else.
 2. **Server-authoritative.** The `shared/` engine is pure `(state, action) -> newState`, but only
@@ -689,6 +697,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
    intent only and receive `redactFor(...)` views — never the deck, seed, or foreign hole cards.
 
 ## Conventions
+
 - **Relative imports end in `.js`** even though sources are `.ts` (`import { x } from "./x.js"`).
 - Tests colocated: `src/foo.ts` ↔ `src/foo.test.ts`. Vitest.
 - `Action.amount` is **raise-TO** (total chips committed this street), NOT raise-by.
@@ -697,28 +706,33 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
   `!` only when provably in-bounds, otherwise guard.
 
 ## Workspaces
+
 - `shared/` `@poker/shared` — pure engine (this is the only thing built so far).
 - `client/` — React/Vite (placeholder).
 - `party/` — PartyKit rooms (placeholder).
 - `supabase/` — migrations + edge function (empty).
 
 ## Commands
+
 - `npm test` — run all Vitest suites. Single file: `npm test -- shared/src/x.test.ts`.
 - `npm run typecheck` — `tsc -b`.
 - `npm run lint` — ESLint.
 
 ## Release gates (must stay green)
+
 - **Hand-eval oracle gate:** `evaluate7` ordering matches `evaluate7Naive` over 100k seeded hands.
 - **Chip-conservation gate:** side-pot build + showdown distribution conserves chips over
   randomized multi-all-in hands.
 
 ## Match formats & rating
+
 - Formats `rapid` / `turbo` (default) / `long` in `constants.ts`. Match length is a HARD cap;
   a hand in progress at the buzzer plays out (grace-finish). Blinds escalate then hold.
 - Rating: opponent-relative pairwise Elo, default 400, K=24 (provisional 48 for first 30 games).
   Rank tiers (display): Fish/Limper/Grinder/Shark/Semi-Pro/Final Tablist.
 
 ## Working practice
+
 - Scout skills every turn (TDD, systematic-debugging, verification-before-completion).
 - Keep this file updated as modules land and conventions are set.
 ```
@@ -737,6 +751,7 @@ git add -A && git commit -m "feat(shared): constants (formats, rating, rank tier
 ## Task 7: Placeholder workspaces (`client`, `party`, `supabase`)
 
 **Files:**
+
 - Create: `client/package.json`, `client/src/.gitkeep`
 - Create: `party/package.json`, `party/src/.gitkeep`
 - Create: `supabase/.gitkeep`
@@ -783,6 +798,7 @@ git add -A && git commit -m "chore: placeholder client/party/supabase workspaces
 ## Task 8: `cards.ts` — card int encoding
 
 **Files:**
+
 - Create: `shared/src/cards.ts`
 - Test: `shared/src/cards.test.ts`
 
@@ -790,9 +806,7 @@ git add -A && git commit -m "chore: placeholder client/party/supabase workspaces
 
 ```ts
 import { describe, it, expect } from "vitest";
-import {
-  rankOf, suitOf, makeCard, cardToString, cardFromString, fullDeck,
-} from "./cards.js";
+import { rankOf, suitOf, makeCard, cardToString, cardFromString, fullDeck } from "./cards.js";
 
 describe("cards", () => {
   it("round-trips known cards", () => {
@@ -885,6 +899,7 @@ git add -A && git commit -m "feat(shared): card int encoding (cards.ts)"
 ## Task 9: `deck.ts` — seeded shuffle
 
 **Files:**
+
 - Create: `shared/src/deck.ts`
 - Test: `shared/src/deck.test.ts`
 
@@ -954,6 +969,7 @@ git add -A && git commit -m "feat(shared): seeded Fisher-Yates shuffledDeck"
 ## Task 10: `handEval` categories + `evaluate5` + `evaluate7Naive` (oracle)
 
 **Files:**
+
 - Create: `shared/src/handEval/categories.ts`
 - Create: `shared/src/handEval/evaluate5.ts`
 - Create: `shared/src/handEval/evaluate7Naive.ts`
@@ -1094,7 +1110,8 @@ export function evaluate5(cards: Card[]): number {
   if (isFlush) return pack(HandCategory.Flush, ranks);
   if (straightHigh >= 0) return pack(HandCategory.Straight, [straightHigh]);
   if (counts[0] === 3) return pack(HandCategory.Trips, [gr[0]!, gr[1]!, gr[2]!]);
-  if (counts[0] === 2 && counts[1] === 2) return pack(HandCategory.TwoPair, [gr[0]!, gr[1]!, gr[2]!]);
+  if (counts[0] === 2 && counts[1] === 2)
+    return pack(HandCategory.TwoPair, [gr[0]!, gr[1]!, gr[2]!]);
   if (counts[0] === 2) return pack(HandCategory.Pair, [gr[0]!, gr[1]!, gr[2]!, gr[3]!]);
   return pack(HandCategory.HighCard, ranks);
 }
@@ -1111,8 +1128,7 @@ const COMBOS: number[][] = (() => {
   for (let a = 0; a < 7; a++)
     for (let b = a + 1; b < 7; b++)
       for (let c = b + 1; c < 7; c++)
-        for (let d = c + 1; d < 7; d++)
-          for (let e = d + 1; e < 7; e++) r.push([a, b, c, d, e]);
+        for (let d = c + 1; d < 7; d++) for (let e = d + 1; e < 7; e++) r.push([a, b, c, d, e]);
   return r;
 })();
 
@@ -1121,7 +1137,11 @@ export function evaluate7Naive(cards: Card[]): number {
   let best = -1;
   for (const cmb of COMBOS) {
     const v = evaluate5([
-      cards[cmb[0]!]!, cards[cmb[1]!]!, cards[cmb[2]!]!, cards[cmb[3]!]!, cards[cmb[4]!]!,
+      cards[cmb[0]!]!,
+      cards[cmb[1]!]!,
+      cards[cmb[2]!]!,
+      cards[cmb[3]!]!,
+      cards[cmb[4]!]!,
     ]);
     if (v > best) best = v;
   }
@@ -1145,6 +1165,7 @@ git add -A && git commit -m "feat(shared): hand categories, evaluate5, evaluate7
 ## Task 11: `evaluate7` fast bitmask evaluator
 
 **Files:**
+
 - Create: `shared/src/handEval/evaluate7.ts`
 - Create: `shared/src/handEval/index.ts`
 - Test: `shared/src/handEval/evaluate7.test.ts`
@@ -1307,6 +1328,7 @@ git add -A && git commit -m "feat(shared): fast bitmask evaluate7 + handEval ind
 ## Task 12: Hand-eval oracle gate (100k property test)
 
 **Files:**
+
 - Test: `shared/src/handEval/oracle.property.test.ts`
 
 - [ ] **Step 1: Write the property test `shared/src/handEval/oracle.property.test.ts`**
@@ -1325,7 +1347,9 @@ describe("GATE: evaluate7 matches the oracle over 100k random hands", () => {
       const fast = evaluate7(hand);
       const slow = evaluate7Naive(hand);
       if (fast !== slow) {
-        throw new Error(`mismatch at seed ${seed}: fast=${fast} slow=${slow} hand=${hand.join(",")}`);
+        throw new Error(
+          `mismatch at seed ${seed}: fast=${fast} slow=${slow} hand=${hand.join(",")}`,
+        );
       }
     }
     expect(true).toBe(true);
@@ -1360,6 +1384,7 @@ git add -A && git commit -m "test(shared): GATE - evaluate7 matches oracle over 
 ## Task 13: Engine types + betting helpers + `createHand`
 
 **Files:**
+
 - Create: `shared/src/engine/types.ts`
 - Create: `shared/src/engine/betting.ts`
 - Create: `shared/src/engine/state.ts`
@@ -1380,7 +1405,11 @@ describe("createHand", () => {
   it("deals two hole cards to every active seat and sets preflop", () => {
     const st = createHand({
       seats: seats([1000, 1000, 1000, 1000, 1000, 1000]),
-      buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: fullDeck(),
+      handNumber: 1,
     });
     expect(st.street).toBe("preflop");
     for (const s of st.seats) {
@@ -1392,7 +1421,11 @@ describe("createHand", () => {
   it("posts SB and BB and sets currentBet to the big blind", () => {
     const st = createHand({
       seats: seats([1000, 1000, 1000, 1000, 1000, 1000]),
-      buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: fullDeck(),
+      handNumber: 1,
     });
     expect(st.seats[1]!.committedThisStreet).toBe(10); // SB left of button
     expect(st.seats[2]!.committedThisStreet).toBe(20); // BB
@@ -1405,7 +1438,11 @@ describe("createHand", () => {
   it("heads-up: button is SB and acts first preflop", () => {
     const st = createHand({
       seats: seats([1000, 1000, null, null, null, null]),
-      buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: fullDeck(),
+      handNumber: 1,
     });
     expect(st.seats[0]!.committedThisStreet).toBe(10); // button posts SB
     expect(st.seats[1]!.committedThisStreet).toBe(20); // BB
@@ -1415,7 +1452,11 @@ describe("createHand", () => {
   it("skips busted seats for blinds and dealing", () => {
     const st = createHand({
       seats: seats([1000, 0, 1000, 1000, null, null]),
-      buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: fullDeck(),
+      handNumber: 1,
     });
     // seat 1 is busted -> SB is seat 2, BB seat 3
     expect(st.seats[1]!.status).toBe("busted");
@@ -1428,7 +1469,11 @@ describe("createHand", () => {
     expect(() =>
       createHand({
         seats: seats([1000, 0, null, null, null, null]),
-        buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1,
+        buttonIndex: 0,
+        sb: 10,
+        bb: 20,
+        deck: fullDeck(),
+        handNumber: 1,
       }),
     ).toThrow();
   });
@@ -1705,6 +1750,7 @@ git add -A && git commit -m "feat(engine): types, betting helpers, createHand"
 ## Task 14: `legalActions`
 
 **Files:**
+
 - Create: `shared/src/engine/legalActions.ts`
 - Test: `shared/src/engine/legalActions.test.ts`
 
@@ -1739,9 +1785,18 @@ describe("legalActions", () => {
       createSeat("a", false, 1000),
       createSeat("b", false, 1000),
       createSeat("c", false, 35), // can only raise to 35 max, below full min of 40
-      null, null, null,
+      null,
+      null,
+      null,
     ];
-    const st = createHand({ seats, buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1 });
+    const st = createHand({
+      seats,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: fullDeck(),
+      handNumber: 1,
+    });
     const m = legalActions(st, 2); // seat c is UTG (after BB? heads/3-handed) -> compute generally
     // seat c has stack 35, faces bet 20
     expect(m.maxRaiseTo).toBe(35);
@@ -1778,8 +1833,14 @@ export function legalActions(state: TableState, i: number): ActionMask {
   const s = state.seats[i];
   if (!s || s.status !== "active") {
     return {
-      seat: i, canFold: false, canCheck: false, canCall: false, callAmount: 0,
-      canRaise: false, minRaiseTo: 0, maxRaiseTo: 0,
+      seat: i,
+      canFold: false,
+      canCheck: false,
+      canCall: false,
+      callAmount: 0,
+      canRaise: false,
+      minRaiseTo: 0,
+      maxRaiseTo: 0,
     };
   }
   const toCall = Math.max(0, state.currentBet - s.committedThisStreet);
@@ -1823,6 +1884,7 @@ git add -A && git commit -m "feat(engine): legalActions mask (single source for 
 ## Task 15: `pots.ts` — main + side pots with dead money
 
 **Files:**
+
 - Create: `shared/src/engine/pots.ts`
 - Test: `shared/src/engine/pots.test.ts`
 
@@ -1972,6 +2034,7 @@ git add -A && git commit -m "feat(engine): side-pot construction with dead money
 ## Task 16: `showdown.ts` — distribution, ties, odd chip, single-winner
 
 **Files:**
+
 - Create: `shared/src/engine/showdown.ts`
 - Test: `shared/src/engine/showdown.test.ts`
 
@@ -1984,7 +2047,12 @@ import { createSeat } from "./state.js";
 import { cardFromString as C } from "../cards.js";
 import type { GameEvent, Seat, TableState } from "./types.js";
 
-function mkSeat(id: string, hole: string | null, committedTotal: number, status: Seat["status"]): Seat {
+function mkSeat(
+  id: string,
+  hole: string | null,
+  committedTotal: number,
+  status: Seat["status"],
+): Seat {
   return {
     ...createSeat(id, false, 0),
     holeCards: hole ? (hole.split(" ").map(C) as [number, number]) : null,
@@ -1995,16 +2063,34 @@ function mkSeat(id: string, hole: string | null, committedTotal: number, status:
 
 function mkState(seats: (Seat | null)[], board: string): TableState {
   return {
-    seats, buttonIndex: 0, street: "river", board: board.split(" ").map(C),
-    deck: [], deckPointer: 0, sb: 10, bb: 20, currentBet: 0, lastRaiseSize: 20,
-    toAct: null, lastAggressor: null, handNumber: 1, pots: [],
+    seats,
+    buttonIndex: 0,
+    street: "river",
+    board: board.split(" ").map(C),
+    deck: [],
+    deckPointer: 0,
+    sb: 10,
+    bb: 20,
+    currentBet: 0,
+    lastRaiseSize: 20,
+    toAct: null,
+    lastAggressor: null,
+    handNumber: 1,
+    pots: [],
   };
 }
 
 describe("settleShowdown", () => {
   it("awards the whole pot to the best hand", () => {
     const st = mkState(
-      [mkSeat("a", "Ah Ad", 100, "active"), mkSeat("b", "Kh Kd", 100, "active"), null, null, null, null],
+      [
+        mkSeat("a", "Ah Ad", 100, "active"),
+        mkSeat("b", "Kh Kd", 100, "active"),
+        null,
+        null,
+        null,
+        null,
+      ],
       "2c 7d 9s Jh 3c",
     );
     const events: GameEvent[] = [];
@@ -2021,7 +2107,9 @@ describe("settleShowdown", () => {
         mkSeat("a", "2d 3h", 20, "active"),
         mkSeat("b", "4h 5s", 20, "active"),
         mkSeat("c", null, 11, "folded"),
-        null, null, null,
+        null,
+        null,
+        null,
       ],
       "Ac Kc Qc Jc Tc",
     );
@@ -2038,7 +2126,9 @@ describe("settleShowdown", () => {
         mkSeat("a", "Ah Ad", 40, "allin"), // best hand but only eligible for main
         mkSeat("b", "Kh Kd", 100, "active"),
         mkSeat("c", "Qh Qd", 100, "active"),
-        null, null, null,
+        null,
+        null,
+        null,
       ],
       "Ac 2d 7s Jh 3c", // a makes trip aces; b kings; c queens
     );
@@ -2054,7 +2144,14 @@ describe("settleShowdown", () => {
 describe("awardSingleWinner", () => {
   it("gives the entire pot to the only remaining seat", () => {
     const st = mkState(
-      [mkSeat("a", "2c 3c", 30, "active"), mkSeat("b", "Kh Kd", 20, "folded"), null, null, null, null],
+      [
+        mkSeat("a", "2c 3c", 30, "active"),
+        mkSeat("b", "Kh Kd", 20, "folded"),
+        null,
+        null,
+        null,
+        null,
+      ],
       "",
     );
     const events: GameEvent[] = [];
@@ -2177,6 +2274,7 @@ git add -A && git commit -m "feat(engine): showdown distribution (ties, odd chip
 ## Task 17: `reducer.ts` — `applyAction` + street advance
 
 **Files:**
+
 - Create: `shared/src/engine/reducer.ts`
 - Test: `shared/src/engine/reducer.test.ts`
 
@@ -2242,7 +2340,14 @@ describe("reducer betting flow", () => {
   });
 
   it("all-in heads-up runs the board out to showdown", () => {
-    const seats = [createSeat("a", false, 1000), createSeat("b", false, 1000), null, null, null, null];
+    const seats = [
+      createSeat("a", false, 1000),
+      createSeat("b", false, 1000),
+      null,
+      null,
+      null,
+      null,
+    ];
     let st = createHand({ seats, buttonIndex: 0, sb: 10, bb: 20, deck: fullDeck(), handNumber: 1 });
     // button(0)=SB acts first; shove, other calls
     st = applyAction(st, { seat: 0, type: "raise", amount: 1000 }).state;
@@ -2413,6 +2518,7 @@ git add -A && git commit -m "feat(engine): applyAction reducer with street advan
 ## Task 18: Chip-conservation GATE (randomized property test)
 
 **Files:**
+
 - Test: `shared/src/engine/conservation.property.test.ts`
 
 - [ ] **Step 1: Write the property test `shared/src/engine/conservation.property.test.ts`**
@@ -2493,7 +2599,7 @@ git add -A && git commit -m "test(engine): GATE - chip conservation over 3000 ra
 ```
 
 - [ ] **Step 4: Update `CLAUDE.md`** — confirm both gate file paths under "Release gates":
-  `handEval/oracle.property.test.ts` and `engine/conservation.property.test.ts`.
+      `handEval/oracle.property.test.ts` and `engine/conservation.property.test.ts`.
 
 ```bash
 git add -A && git commit -m "docs: record both release-gate paths in CLAUDE.md"
@@ -2504,6 +2610,7 @@ git add -A && git commit -m "docs: record both release-gate paths in CLAUDE.md"
 ## Task 19: `selectors.ts` — `redactFor` anti-cheat boundary
 
 **Files:**
+
 - Create: `shared/src/engine/selectors.ts`
 - Test: `shared/src/engine/selectors.test.ts`
 
@@ -2636,6 +2743,7 @@ git add -A && git commit -m "feat(engine): redactFor public view (anti-cheat bou
 ## Task 20: `elo/pairwise.ts`
 
 **Files:**
+
 - Create: `shared/src/elo/pairwise.ts`
 - Test: `shared/src/elo/pairwise.test.ts`
 
@@ -2749,6 +2857,7 @@ git add -A && git commit -m "feat(shared): opponent-relative pairwise Elo"
 ## Task 21: `bots/policy.ts` + bot-vs-bot integration
 
 **Files:**
+
 - Create: `shared/src/bots/policy.ts`
 - Test: `shared/src/bots/policy.test.ts`
 
@@ -2769,19 +2878,55 @@ import type { PublicView } from "../engine/selectors.js";
 function viewWith(stack: number, currentBet: number): PublicView {
   return {
     seats: [
-      { id: "me", isBot: true, stack, committedThisStreet: 0, committedTotal: 0, status: "active", holeCards: null },
-      { id: "x", isBot: true, stack: 1000, committedThisStreet: currentBet, committedTotal: currentBet, status: "active", holeCards: null },
-      null, null, null, null,
+      {
+        id: "me",
+        isBot: true,
+        stack,
+        committedThisStreet: 0,
+        committedTotal: 0,
+        status: "active",
+        holeCards: null,
+      },
+      {
+        id: "x",
+        isBot: true,
+        stack: 1000,
+        committedThisStreet: currentBet,
+        committedTotal: currentBet,
+        status: "active",
+        holeCards: null,
+      },
+      null,
+      null,
+      null,
+      null,
     ],
-    buttonIndex: 0, street: "preflop", board: [], sb: 10, bb: 20,
-    currentBet, lastRaiseSize: 20, toAct: 0, handNumber: 1, pots: [],
+    buttonIndex: 0,
+    street: "preflop",
+    board: [],
+    sb: 10,
+    bb: 20,
+    currentBet,
+    lastRaiseSize: 20,
+    toAct: 0,
+    handNumber: 1,
+    pots: [],
   };
 }
 
 describe("decide", () => {
   it("is deterministic for the same inputs and seed", () => {
     const v = viewWith(1000, 20);
-    const mask = { seat: 0, canFold: true, canCheck: false, canCall: true, callAmount: 20, canRaise: true, minRaiseTo: 40, maxRaiseTo: 1000 };
+    const mask = {
+      seat: 0,
+      canFold: true,
+      canCheck: false,
+      canCall: true,
+      callAmount: 20,
+      canRaise: true,
+      minRaiseTo: 40,
+      maxRaiseTo: 1000,
+    };
     const a1 = decide(v, [C("Ah"), C("Ad")] as [number, number], mask, mulberry32(7));
     const a2 = decide(v, [C("Ah"), C("Ad")] as [number, number], mask, mulberry32(7));
     expect(a1).toEqual(a2);
@@ -2789,7 +2934,16 @@ describe("decide", () => {
 
   it("always returns a legal action", () => {
     const v = viewWith(1000, 20);
-    const mask = { seat: 0, canFold: true, canCheck: false, canCall: true, callAmount: 20, canRaise: true, minRaiseTo: 40, maxRaiseTo: 1000 };
+    const mask = {
+      seat: 0,
+      canFold: true,
+      canCheck: false,
+      canCall: true,
+      callAmount: 20,
+      canRaise: true,
+      minRaiseTo: 40,
+      maxRaiseTo: 1000,
+    };
     const a = decide(v, [C("7h"), C("2d")] as [number, number], mask, mulberry32(3));
     expect(["fold", "check", "call", "raise"]).toContain(a.type);
     if (a.type === "raise") {
@@ -2800,14 +2954,32 @@ describe("decide", () => {
 
   it("shoves a premium hand when short-stacked", () => {
     const v = viewWith(100, 20); // 5bb
-    const mask = { seat: 0, canFold: true, canCheck: false, canCall: true, callAmount: 20, canRaise: true, minRaiseTo: 40, maxRaiseTo: 100 };
+    const mask = {
+      seat: 0,
+      canFold: true,
+      canCheck: false,
+      canCall: true,
+      callAmount: 20,
+      canRaise: true,
+      minRaiseTo: 40,
+      maxRaiseTo: 100,
+    };
     const a = decide(v, [C("Ah"), C("Ad")] as [number, number], mask, mulberry32(1));
     expect(a).toEqual({ seat: 0, type: "raise", amount: 100 });
   });
 
   it("folds trash facing a bet", () => {
     const v = viewWith(1000, 20);
-    const mask = { seat: 0, canFold: true, canCheck: false, canCall: true, callAmount: 20, canRaise: true, minRaiseTo: 40, maxRaiseTo: 1000 };
+    const mask = {
+      seat: 0,
+      canFold: true,
+      canCheck: false,
+      canCall: true,
+      callAmount: 20,
+      canRaise: true,
+      minRaiseTo: 40,
+      maxRaiseTo: 1000,
+    };
     const a = decide(v, [C("7h"), C("2d")] as [number, number], mask, mulberry32(99));
     expect(a.type).toBe("fold");
   });
@@ -2816,7 +2988,14 @@ describe("decide", () => {
 describe("bots play a full hand to completion", () => {
   it("6 bots reach a complete hand with chips conserved", () => {
     const seats = Array.from({ length: 6 }, (_, i) => createSeat("b" + i, true, 1000));
-    let st = createHand({ seats, buttonIndex: 0, sb: 10, bb: 20, deck: shuffledDeck(123), handNumber: 1 });
+    let st = createHand({
+      seats,
+      buttonIndex: 0,
+      sb: 10,
+      bb: 20,
+      deck: shuffledDeck(123),
+      handNumber: 1,
+    });
     const before = 6000;
     const rng = mulberry32(123);
     let guard = 0;
@@ -2944,6 +3123,7 @@ git add -A && git commit -m "feat(shared): tight-aggressive bot policy + bot-vs-
 ## Task 22: `protocol.ts` — encode/decode (tag-only validation)
 
 **Files:**
+
 - Create: `shared/src/protocol.ts`
 - Test: `shared/src/protocol.test.ts`
 
@@ -3031,6 +3211,7 @@ git add -A && git commit -m "feat(shared): wire protocol encode/decode (tag-only
 ## Task 23: Package barrel export + full verification + CLAUDE.md finalize
 
 **Files:**
+
 - Modify: `shared/src/index.ts`
 - Modify: `CLAUDE.md`
 
@@ -3092,10 +3273,10 @@ git add -A && git commit -m "feat(shared): public barrel export; Build Unit 1 co
 - [ ] `npm test` green, including both property-test gates at full iteration counts.
 - [ ] `npm run typecheck` and `npm run lint` clean.
 - [ ] `shared/` exports cards, deck, hand eval (oracle + fast), the betting reducer, pots/showdown,
-  `redactFor`, pairwise Elo, bot policy, and the protocol shell.
+      `redactFor`, pairwise Elo, bot policy, and the protocol shell.
 - [ ] `CLAUDE.md` is current and documents conventions, gates, and next steps.
 - [ ] Placeholder `client/` and `party/` workspaces and an empty `supabase/` dir exist for the
-  next units to build into.
+      next units to build into.
 
 **Next unit (separate spec + plan):** PartyKit `MatchRoom` — server-authoritative deal → private
 hole cards → action loop → redacted snapshots, then timers/timebank, match clock/blinds/bust
