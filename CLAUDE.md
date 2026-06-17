@@ -46,6 +46,14 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 - Rating: opponent-relative pairwise Elo, default 400, K=24 (provisional 48 for first 30 games).
   Rank tiers (display): Fish/Limper/Grinder/Shark/Semi-Pro/Final Tablist.
 
+## Security requirements
+
+- **CSPRNG seeds (Build Unit 2 — server):** `shuffledDeck(seed)` is deterministic by design
+  (test/replay interface). The PartyKit server MUST generate seeds via `crypto.getRandomValues` or
+  `crypto.randomInt`, NEVER from a user-supplied, clock-based, or otherwise predictable source.
+  A 32-bit seed from a CSPRNG is acceptable; a 128-bit seed is preferred. Violation exposes
+  opponents' hole cards to an attacker who can brute-force ~4B deck states from community cards.
+
 ## Working practice
 
 - Scout skills every turn (TDD, systematic-debugging, verification-before-completion).
