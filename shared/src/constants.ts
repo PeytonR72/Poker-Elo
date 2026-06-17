@@ -100,7 +100,7 @@ export const MATCH_FORMATS: Record<string, MatchFormat> = {
 export const DEFAULT_FORMAT = "turbo";
 
 /** Blind level for an elapsed match time (clamped to the top level). */
-export function blindLevelAt(format: MatchFormat, elapsedMs: number): BlindLevel {
+export function blindLevelAt(elapsedMs: number, format: MatchFormat): BlindLevel {
   const idx = Math.min(
     Math.floor(elapsedMs / format.blindLevelDurationMs),
     format.blindLevels.length - 1,
