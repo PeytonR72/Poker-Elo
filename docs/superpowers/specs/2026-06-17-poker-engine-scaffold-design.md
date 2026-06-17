@@ -81,24 +81,48 @@ server, edge function all import from here in later units).
 **Shared constants:**
 - `TABLE_SIZE = 6`
 - `STARTING_STACK = 1000`
-- `ELO_DEFAULT_RATING = 1000`, `ELO_K_FACTOR`, provisional K, provisional-games threshold
+- `ELO_DEFAULT_RATING = 400`, `ELO_K_FACTOR = 24`, provisional K `= 48`, provisional-games
+  threshold `= 30` (see §7 for the fairness rationale on the 400 scale)
+- `RANK_TIERS` — display rank bands by rating (see below)
 - `RANKED_MIN_ONLINE`, rating-window growth params, `QUEUE_MATCH_INTERVAL_MS`
 - `BOT_FILL_WAIT_MS`, bot decision-delay bounds
 - `DISCONNECT_GRACE_MS`, timebank params
 - `MATCH_CODE_LENGTH`
-- `MATCH_GRACE_FINISH` (finish the in-progress hand after the buzzer)
+- `MATCH_GRACE_FINISH = true` (a hand already in progress at the buzzer plays out to completion;
+  see "Timers are hard limits" below)
 - `HEADS_UP_EARLY_END` (collapse-to-one ends match)
 
-**Match formats** — a `MATCH_FORMATS` map keyed by id (`rapid` | `turbo` | `standard`), with
+**Timers are hard limits, not estimates.** `matchDurationMs` is a hard cap: **no new hand starts**
+once the match clock expires. The one exception is the grace-finish rule — a hand that has already
+begun when the buzzer fires (e.g. dealt with 5 seconds left) **continues until that hand finishes**,
+then the match ends. `turnTimeMs` is likewise a hard per-turn cap (on expiry the server, in a later
+unit, auto-checks if legal else folds). `blindLevelDurationMs` boundaries are exact.
+
+**Match formats** — a `MATCH_FORMATS` map keyed by id (`rapid` | `turbo` | `long`), with
 `DEFAULT_FORMAT = "turbo"`. Each format defines `matchDurationMs`, `blindLevelDurationMs`,
 `turnTimeMs`, and a `blindLevels` ladder. Blinds **escalate and hold at the top level** once the
 clock passes the last level boundary. Start stack $1000 = 50 BB at level 1, ~10 BB at the top.
+Match length is a hard cap (per "Timers are hard limits" above).
 
-| Format | Match length | Level len | Turn timer | Blind ladder (SB/BB) |
+| Format | Match length (hard cap) | Level len | Turn timer | Blind ladder (SB/BB) |
 |---|---|---|---|---|
-| **rapid** | ~5 min | ~60s | ~15s | 10/20 → 15/30 → 25/50 → 40/80 → 50/100 |
-| **turbo** *(default)* | ~10 min | ~120s | ~20s | 10/20 → 15/30 → 20/40 → 30/60 → 50/100 |
-| **standard** | ~18 min | ~180s | ~25s | 10/20 → 15/30 → 20/40 → 30/60 → 40/80 → 50/100 → 75/150 |
+| **rapid** | 5 min | 60s | 15s | 10/20 → 15/30 → 25/50 → 40/80 → 50/100 |
+| **turbo** *(default)* | 10 min | 120s | 20s | 10/20 → 15/30 → 20/40 → 30/60 → 50/100 |
+| **long** | 20 min | 180s | 25s | 10/20 → 15/30 → 20/40 → 30/60 → 40/80 → 50/100 → 75/150 |
+
+**Rank tiers** (`RANK_TIERS`, display only; subject to change):
+
+| Rank | Rating range |
+|---|---|
+| Fish | 0 – 500 |
+| Limper | 500 – 750 |
+| Grinder | 750 – 1000 |
+| Shark | 1000 – 1300 |
+| Semi-Pro | 1300 – 1750 |
+| Final Tablist | 1750+ |
+
+New players start at **400** (top of Fish, just below Limper). Ranks are pure presentation derived
+from rating; the engine/Elo math doesn't depend on them.
 
 **Antes decision:** v1 uses **blind escalation only, no separate antes.** A true big-blind ante
 posts dead money preflop and complicates the betting/pot logic; it is deferred. The engine should
@@ -168,6 +192,13 @@ reopening behavior, button rotation past busted seats.
   `E = 1 / (1 + 10^((Rj - Ri) / 400))`, accumulate `K * (S - E)` per player. **Do NOT divide K by
   (N-1)** (ranked must feel meaningful). Tie-in-chips at the buzzer → same finishing place → S=0.5.
   Provisional players use a higher K. K and provisional params come from `constants.ts`.
+  - **Fairness on the 400 scale.** The `/400` divisor inside `E` is the standard Elo logistic width
+    and is independent of the starting rating — it stays 400. With the new `ELO_DEFAULT_RATING=400`,
+    `K=24`, and no `/(N-1)` divide, a player who finishes 1st against five equal-rated opponents
+    gains ≈ `K * (5 − 2.5) = +60`, and last place loses ≈ `−60`; an even finish nets ≈ 0. That makes
+    a single match meaningful relative to the rank bands (250–500 wide) without runaway swings.
+    Provisional `K=48` (first 30 games) roughly doubles early movement so new accounts find their
+    band quickly. All values are starting defaults in `constants.ts` and tunable.
 - **`bots/policy.ts`** — pure `decide(view, hole, rng) -> Action`. Tight-aggressive with position
   awareness (preflop hand tiers by position), postflop made-hand bucket derived from `evaluate7`
   vs pot odds, push/fold when short-stacked, and a low rng-gated bluff frequency. Pure + seeded RNG
