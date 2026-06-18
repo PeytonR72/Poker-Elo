@@ -55,4 +55,6 @@ export interface TableState {
   lastAggressor: number | null;
   handNumber: number;
   pots: Pot[];
+  elapsedMs: number;
+  format: string;
 }

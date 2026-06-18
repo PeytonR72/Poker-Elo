@@ -47,8 +47,10 @@ export function createHand(params: {
   bb: number;
   deck: Card[];
   handNumber: number;
+  elapsedMs: number;
+  format: string;
 }): TableState {
-  const { buttonIndex, sb, bb, deck, handNumber } = params;
+  const { buttonIndex, sb, bb, deck, handNumber, elapsedMs, format } = params;
   const seats = params.seats.map((s) =>
     s
       ? ({
@@ -97,6 +99,8 @@ export function createHand(params: {
     lastAggressor: bbIdx,
     handNumber,
     pots: [],
+    elapsedMs,
+    format,
   };
 
   postBlind(state, sbIdx, sb);

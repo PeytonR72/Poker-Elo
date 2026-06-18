@@ -15,6 +15,8 @@ describe("createHand", () => {
       bb: 20,
       deck: fullDeck(),
       handNumber: 1,
+      elapsedMs: 0,
+      format: "turbo",
     });
     expect(st.street).toBe("preflop");
     for (const s of st.seats) {
@@ -31,6 +33,8 @@ describe("createHand", () => {
       bb: 20,
       deck: fullDeck(),
       handNumber: 1,
+      elapsedMs: 0,
+      format: "turbo",
     });
     expect(st.seats[1]!.committedThisStreet).toBe(10); // SB left of button
     expect(st.seats[2]!.committedThisStreet).toBe(20); // BB
@@ -48,6 +52,8 @@ describe("createHand", () => {
       bb: 20,
       deck: fullDeck(),
       handNumber: 1,
+      elapsedMs: 0,
+      format: "turbo",
     });
     expect(st.seats[0]!.committedThisStreet).toBe(10); // button posts SB
     expect(st.seats[1]!.committedThisStreet).toBe(20); // BB
@@ -62,6 +68,8 @@ describe("createHand", () => {
       bb: 20,
       deck: fullDeck(),
       handNumber: 1,
+      elapsedMs: 0,
+      format: "turbo",
     });
     // seat 1 is busted -> SB is seat 2, BB seat 3
     expect(st.seats[1]!.status).toBe("busted");
@@ -79,6 +87,8 @@ describe("createHand", () => {
         bb: 20,
         deck: fullDeck(),
         handNumber: 1,
+        elapsedMs: 0,
+        format: "turbo",
       }),
     ).toThrow();
   });
