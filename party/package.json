@@ -2,5 +2,14 @@
   "name": "@poker/party",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@poker/shared": "*",
+    "jose": "^5.0.0",
+    "partykit": "^0.0.108"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
 }
