@@ -2151,13 +2151,17 @@ describe("Task 13: integration smoke test", () => {
 
     const mo = JSON.parse(matchOverBroadcast!);
 
-    // Check finishPlaceById: all 6 seat IDs with finite places
+    // Check finishPlaceById: all 6 seat IDs with finite places 1–6
     const places = mo.finishPlaceById as Record<string, number>;
     expect(Object.keys(places)).toHaveLength(6);
     for (const place of Object.values(places)) {
       expect(typeof place).toBe("number");
       expect(Number.isFinite(place)).toBe(true);
     }
+    // Places must be a valid ranking (values 1–6, allowing ties that compress the range)
+    const sortedPlaces = Object.values(places).sort((a, b) => a - b);
+    expect(sortedPlaces[0]).toBe(1);
+    expect(sortedPlaces[sortedPlaces.length - 1]).toBeLessThanOrEqual(6);
 
     // Check eloDeltas: all 6 seat IDs with finite non-NaN numbers
     const deltas = mo.eloDeltas as Record<string, number>;
