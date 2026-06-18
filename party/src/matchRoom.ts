@@ -6,6 +6,7 @@ import {
   shuffledDeck,
   createHand,
   createSeat,
+  cloneState,
   redactFor,
   STARTING_STACK,
   DEFAULT_FORMAT,
@@ -78,6 +79,7 @@ export default class MatchRoom implements Party.Server {
   // In-memory state — ephemeral per room instance
   private players = new Map<string, ConnState>(); // conn.id → ConnState
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>(); // playerId → handle
+  private savedTimebankMs = new Map<string, number>(); // playerId → timebankMs (preserved across disconnect)
 
   private tableState: TableState | null = null;
   private matchStartMs: number = 0; // Date.now() when match started
@@ -97,8 +99,10 @@ export default class MatchRoom implements Party.Server {
     const connState = this.players.get(conn.id);
     if (connState?.authed && connState.playerId) {
       const { playerId, seatIndex } = connState;
+      this.savedTimebankMs.set(playerId, connState.timebankMs);
       const timer = setTimeout(() => {
         this.disconnectTimers.delete(playerId);
+        this.savedTimebankMs.delete(playerId);
         this.onDisconnectExpired(playerId, seatIndex);
       }, DISCONNECT_GRACE_MS);
       this.disconnectTimers.set(playerId, timer);
@@ -260,8 +264,9 @@ export default class MatchRoom implements Party.Server {
       state.playerId = playerId;
       state.seatIndex = restoredSeatIndex;
       state.authed = true;
-      // Restore timebankMs from the seat's prior ConnState if it existed; otherwise use initial
-      state.timebankMs = TIMEBANK_INITIAL_MS;
+      // Restore the saved timebank from before the disconnect; fall back to initial if not saved
+      state.timebankMs = this.savedTimebankMs.get(playerId) ?? TIMEBANK_INITIAL_MS;
+      this.savedTimebankMs.delete(playerId);
 
       if (restoredSeatIndex !== null) {
         sender.send(encode({ t: "seated", seatIndex: restoredSeatIndex, playerId }));
@@ -272,18 +277,14 @@ export default class MatchRoom implements Party.Server {
         const view = redactFor(playerId, this.tableState);
         sender.send(encode({ t: "snapshot", view }));
 
-        // If it's this player's turn, resend yourTurn
+        // If it's this player's turn, cancel the stale timer and restart via sendYourTurn()
+        // (TurnTimer.start() calls cancel() internally, so sendYourTurn() handles both)
         if (
           restoredSeatIndex !== null &&
           this.tableState.street !== "complete" &&
           this.tableState.toAct === restoredSeatIndex
         ) {
-          const format = MATCH_FORMATS[this.tableState.format];
-          if (format) {
-            const deadlineTs = Date.now() + format.turnTimeMs;
-            const mask = legalActions(this.tableState, restoredSeatIndex);
-            sender.send(encode({ t: "yourTurn", mask, deadlineTs }));
-          }
+          this.sendYourTurn();
         }
       }
 
@@ -454,8 +455,11 @@ export default class MatchRoom implements Party.Server {
   private onDisconnectExpired(playerId: string, seatIndex: number | null): void {
     if (!this.tableState || seatIndex === null) return;
 
-    // If this player is the active seat, auto-fold/check now
-    if (this.tableState.toAct === seatIndex && this.tableState.street !== "complete") {
+    const wasActiveSeat =
+      this.tableState.toAct === seatIndex && this.tableState.street !== "complete";
+
+    // Step 1: if active seat, auto-fold/check so the hand can continue
+    if (wasActiveSeat) {
       this.turnTimer.cancel();
       const mask = legalActions(this.tableState, seatIndex);
       const action: Action = mask.canCheck
@@ -466,22 +470,30 @@ export default class MatchRoom implements Party.Server {
       for (const event of events) {
         this.party.broadcast(encode({ t: "event", event }));
       }
+    }
+
+    // Step 2: mark seat as busted via a clone so the engine's immutable contract is honoured.
+    // We do this BEFORE advancing the hand so onHandComplete() sees the busted status.
+    if (this.tableState) {
+      const newState = cloneState(this.tableState);
+      const clonedSeat = newState.seats[seatIndex];
+      if (clonedSeat && clonedSeat.status !== "busted") {
+        clonedSeat.status = "busted";
+        clonedSeat.stack = 0;
+      }
+      if (!this.bustOrder.includes(playerId)) {
+        this.bustOrder.push(playerId);
+      }
+      this.tableState = newState;
+    }
+
+    // Step 3: broadcast updated snapshots and advance the hand
+    if (wasActiveSeat && this.tableState) {
       this.broadcastSnapshots();
       if (this.tableState.street === "complete") {
         this.onHandComplete();
       } else {
         this.sendYourTurn();
-      }
-    }
-
-    // Mark seat as sitting out: force bust so createHand skips them in future hands.
-    // We do this AFTER any action above so the poker hand logic is unaffected.
-    const seat = this.tableState?.seats[seatIndex];
-    if (seat) {
-      (seat as Seat).status = "busted";
-      (seat as Seat).stack = 0;
-      if (!this.bustOrder.includes(playerId)) {
-        this.bustOrder.push(playerId);
       }
     }
   }
