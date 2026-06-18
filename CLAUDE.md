@@ -36,8 +36,10 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 ## Release gates (must stay green)
 
 - **Hand-eval oracle gate:** `evaluate7` ordering matches `evaluate7Naive` over 100k seeded hands.
+  File: `shared/src/handEval/oracle.property.test.ts`
 - **Chip-conservation gate:** side-pot build + showdown distribution conserves chips over
-  randomized multi-all-in hands.
+  3000 randomized multi-all-in hands.
+  File: `shared/src/engine/conservation.property.test.ts`
 
 ## Match formats & rating
 
