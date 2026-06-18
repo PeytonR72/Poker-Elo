@@ -11,7 +11,7 @@ export function applyAction(
   if (state.street === "complete") throw new Error("hand is complete");
   if (state.toAct !== action.seat) throw new Error(`not seat ${action.seat}'s turn`);
 
-  let s = cloneState(state);
+  const s = cloneState(state);
   const events: GameEvent[] = [];
 
   const seat = s.seats[action.seat]!;

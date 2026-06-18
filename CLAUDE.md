@@ -16,16 +16,46 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 - **Relative imports end in `.js`** even though sources are `.ts` (`import { x } from "./x.js"`).
 - Tests colocated: `src/foo.ts` ↔ `src/foo.test.ts`. Vitest.
 - `Action.amount` is **raise-TO** (total chips committed this street), NOT raise-by.
+- `Action.seat` (not `seatIndex`) — that is the field name on the Action type.
 - A card is an int `0..51`: `rank = c % 13` (0=2 … 12=A), `suit = (c / 13) | 0`.
 - TypeScript strict + `noUncheckedIndexedAccess`. Index access yields `T | undefined`; assert with
   `!` only when provably in-bounds, otherwise guard.
+- `committedThisStreet` and `committedTotal` — the Seat fields used for chip tracking.
+- `SeatStatus` values use `"allin"` (lowercase, one word), not `"allIn"`.
+- `GameEvent` discriminant field names: `blind`, `action`, `street`, `award`, `handComplete`.
+- `settleShowdown` and `awardSingleWinner` both return `{ state, events }` (immutable — never
+  mutate the input state).
 
 ## Workspaces
 
-- `shared/` `@poker/shared` — pure engine (this is the only thing built so far).
+- `shared/` `@poker/shared` — pure engine (Build Unit 1 complete).
 - `client/` — React/Vite (placeholder).
 - `party/` — PartyKit rooms (placeholder).
 - `supabase/` — migrations + edge function (empty).
+
+## `shared/src` module map
+
+| File | Exports |
+|---|---|
+| `rng.ts` | `mulberry32`, `deriveSeed` |
+| `roomCode.ts` | `ROOM_CODE_ALPHABET`, `makeRoomCode` |
+| `constants.ts` | `STARTING_STACK`, `TABLE_SIZE`, `MATCH_FORMATS`, `MATCH_CODE_LENGTH`, `RANK_TIERS`, `ELO_*`, `BOT_*`, `TIMEBANK_*`, `RANKED_MIN_ONLINE`, `QUEUE_MATCH_INTERVAL_MS`, `RATING_WINDOW_*`, `DISCONNECT_GRACE_MS`, `DEFAULT_FORMAT`, `HEADS_UP_EARLY_END`, `MATCH_GRACE_FINISH`, `RANKS`, `SUITS` |
+| `cards.ts` | `Card`, `makeCard`, `rankOf`, `suitOf`, `cardToString`, `cardFromString` |
+| `deck.ts` | `fullDeck`, `shuffledDeck` |
+| `protocol.ts` | `ClientMsg`, `ServerMsg`, `encode`, `decode` |
+| `handEval/index.ts` | `HandCategory`, `evaluate5`, `evaluate7`, `evaluate7Naive`, `pack` |
+| `engine/types.ts` | `Action`, `ActionType`, `ActionMask`, `GameEvent`, `Seat`, `SeatStatus`, `TableState`, `Street`, `Pot` |
+| `engine/state.ts` | `createSeat`, `createHand`, `cloneState` |
+| `engine/betting.ts` | `nextToAct`, `firstNeedsToAct`, `inHandCount`, `activeCount`, `firstActivePostflop`, `blindLevelAt` |
+| `engine/legalActions.ts` | `legalActions`, `seatNeedsToAct` |
+| `engine/pots.ts` | `buildPots` |
+| `engine/showdown.ts` | `settleShowdown`, `awardSingleWinner` |
+| `engine/reducer.ts` | `applyAction` |
+| `engine/selectors.ts` | `redactFor`, `PublicSeat`, `PublicView` |
+| `elo/pairwise.ts` | `pairwiseElo`, `EloPlayer`, `rankForRating` |
+| `bots/policy.ts` | `decide` |
+
+All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
 ## Commands
 
@@ -55,6 +85,13 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
   `crypto.randomInt`, NEVER from a user-supplied, clock-based, or otherwise predictable source.
   A 32-bit seed from a CSPRNG is acceptable; a 128-bit seed is preferred. Violation exposes
   opponents' hole cards to an attacker who can brute-force ~4B deck states from community cards.
+
+## Status
+
+**Build Unit 1 (scaffold + pure engine) is complete.**
+Next unit: PartyKit `MatchRoom` server — server-authoritative deal → private hole cards → action
+loop → redacted snapshots, then timers/timebank, match clock/blinds/bust placement/end, and bot
+runner.
 
 ## Working practice
 

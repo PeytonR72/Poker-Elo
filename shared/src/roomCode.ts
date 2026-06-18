@@ -1,5 +1,3 @@
-import { mulberry32 } from "./rng.js";
-
 /** Unambiguous uppercase alphabet (no O/0/I/1/L). */
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
