@@ -20,10 +20,15 @@ import {
   pairwiseElo,
   ELO_DEFAULT_RATING,
   ELO_K_FACTOR,
+  BOT_DECISION_DELAY_MIN_MS,
+  BOT_DECISION_DELAY_MAX_MS,
+  mulberry32,
+  deriveSeed,
 } from "@poker/shared";
 import type { TableState, PublicView, Action, ActionMask, Seat, EloPlayer } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { TurnTimer } from "./timers.js";
+import { decideBotAction, botThinkDelayMs } from "./botRunner.js";
 
 /** UX pause between hands — not a poker-numeric rule, so defined locally. */
 const INTER_HAND_PAUSE_MS = 3_000;
@@ -88,6 +93,8 @@ export default class MatchRoom implements Party.Server {
 
   private turnTimer = new TurnTimer();
   private timebankUsedThisTurn = false;
+  private seatRngs: Array<(() => number) | null> = [];
+  private botRngSeed = 0;
 
   constructor(readonly party: Party.Party) {}
 
@@ -351,6 +358,15 @@ export default class MatchRoom implements Party.Server {
     });
     this.handNumber++;
 
+    this.botRngSeed = csprngSeed();
+    this.seatRngs = Array.from({ length: TABLE_SIZE }, (_, i) => {
+      const seat = this.tableState!.seats[i];
+      if (seat?.id.startsWith("bot-")) {
+        return mulberry32(deriveSeed(this.botRngSeed, `bot-${i}`));
+      }
+      return null;
+    });
+
     this.broadcastSnapshots();
     this.sendDealPrivate();
     this.sendYourTurn();
@@ -387,6 +403,17 @@ export default class MatchRoom implements Party.Server {
 
     const format = MATCH_FORMATS[this.tableState.format];
     if (!format) return;
+
+    const seatId = this.tableState.seats[seatIdx]?.id;
+    const isBot = seatId?.startsWith("bot-") ?? false;
+
+    if (isBot) {
+      const rng = this.seatRngs[seatIdx] ?? mulberry32(0);
+      const delay = botThinkDelayMs(rng, BOT_DECISION_DELAY_MIN_MS, BOT_DECISION_DELAY_MAX_MS);
+      setTimeout(() => this.executeBotAction(seatIdx), delay);
+      return; // DO NOT start the turn timer for bots
+    }
+
     const deadlineTs = Date.now() + format.turnTimeMs;
     const mask = legalActions(this.tableState, seatIdx);
 
@@ -397,11 +424,31 @@ export default class MatchRoom implements Party.Server {
         break;
       }
     }
-    // Bot seats handled in Task 12
 
     // Start the turn timer
     this.timebankUsedThisTurn = false;
     this.turnTimer.start(format.turnTimeMs, () => this.onTurnExpired(seatIdx));
+  }
+
+  /** Execute an action on behalf of a bot seat. */
+  private executeBotAction(seatIdx: number): void {
+    if (!this.tableState || this.tableState.street === "complete") return;
+    if (this.tableState.toAct !== seatIdx) return;
+    const seat = this.tableState.seats[seatIdx];
+    if (!seat?.holeCards) return;
+    const rng = this.seatRngs[seatIdx] ?? mulberry32(0);
+    const view = redactFor(seat.id, this.tableState);
+    const mask = legalActions(this.tableState, seatIdx);
+    const action = decideBotAction(view, seat.holeCards, mask, rng);
+    const { state, events } = applyAction(this.tableState, action);
+    this.tableState = state;
+    for (const event of events) this.party.broadcast(encode({ t: "event", event }));
+    this.broadcastSnapshots();
+    if (this.tableState.street === "complete") {
+      this.onHandComplete();
+    } else {
+      this.sendYourTurn();
+    }
   }
 
   /** Called when the turn timer fires for the given seat. */
@@ -623,6 +670,11 @@ export default class MatchRoom implements Party.Server {
   /** Exposed for tests — current hand number. */
   get currentHandNumber(): number {
     return this.handNumber;
+  }
+
+  /** Exposed for tests — seatRngs array. */
+  get currentSeatRngs(): Array<(() => number) | null> {
+    return this.seatRngs;
   }
 }
 

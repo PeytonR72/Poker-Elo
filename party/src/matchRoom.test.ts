@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
-import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt } from "@poker/shared";
+import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt, BOT_DECISION_DELAY_MIN_MS, BOT_DECISION_DELAY_MAX_MS } from "@poker/shared";
 import MatchRoom, { csprngSeed, nextNonBustedSeat } from "./matchRoom.js";
+import { botThinkDelayMs } from "./botRunner.js";
 import { TurnTimer } from "./timers.js";
 
 // ---------- helpers ----------
@@ -1886,5 +1887,188 @@ describe("Task 11: disconnect/reconnect grace", () => {
     expect(() => {
       room.onError(conn, new Error("test"));
     }).not.toThrow();
+  });
+});
+
+// ---------- Task 12: Bot runner ----------
+
+/** Set up a match room where one human and the rest are bot seats (dev startMatch). */
+async function setupBotMatch(): Promise<{
+  room: MatchRoom;
+  conns: MockConnectionList;
+  broadcastMsgs: string[];
+}> {
+  const conns = makeConns();
+  const broadcastMsgs: string[] = [];
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+  const room = new MatchRoom(party);
+
+  // Seat exactly one human; remaining seats become bots
+  const conn = mockConn("seat-0");
+  conns.set(conn.id, conn);
+  room.onConnect(conn);
+  await room.onMessage(encode({ t: "hello", jwt: "dev:player-0" }), conn);
+
+  // Trigger match start via dev message
+  await room.onMessage(encode({ t: "startMatch" }), conn);
+
+  return { room, conns, broadcastMsgs };
+}
+
+/** Set up a match room with ALL bot seats (no human connections, triggered via dev message). */
+async function setupAllBotMatch(): Promise<{
+  room: MatchRoom;
+  conns: MockConnectionList;
+  broadcastMsgs: string[];
+}> {
+  const conns = makeConns();
+  const broadcastMsgs: string[] = [];
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+  const room = new MatchRoom(party);
+
+  // One human to auth and trigger startMatch in dev mode; then we'll inspect bot behavior
+  const conn = mockConn("seat-0");
+  conns.set(conn.id, conn);
+  room.onConnect(conn);
+  await room.onMessage(encode({ t: "hello", jwt: "dev:player-0" }), conn);
+  await room.onMessage(encode({ t: "startMatch" }), conn);
+
+  return { room, conns, broadcastMsgs };
+}
+
+describe("Task 12: Bot runner", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("12.1: botThinkDelayMs returns value in [minMs, maxMs)", () => {
+    // Use a simple linear-congruential-style sequence to test range
+    let callCount = 0;
+    const fakeRng = () => {
+      callCount++;
+      // Returns values cycling through 0, 0.25, 0.5, 0.75
+      return ((callCount - 1) % 4) / 4;
+    };
+    const min = BOT_DECISION_DELAY_MIN_MS;
+    const max = BOT_DECISION_DELAY_MAX_MS;
+    for (let i = 0; i < 20; i++) {
+      const delay = botThinkDelayMs(fakeRng, min, max);
+      expect(delay).toBeGreaterThanOrEqual(min);
+      expect(delay).toBeLessThan(max);
+    }
+  });
+
+  it("12.2: turn timer NOT started for bot seat (turnTimer handle is null after bot turn)", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupBotMatch();
+
+    const ts = room.currentTableState!;
+    const toAct = ts.toAct;
+
+    // If the first seat to act is a bot, the turn timer should NOT have been started
+    if (toAct !== null) {
+      const seat = ts.seats[toAct];
+      if (seat?.id.startsWith("bot-")) {
+        // Access turnTimer via private cast — its handle should be null (not started)
+        const turnTimer = (room as unknown as { turnTimer: { handle: ReturnType<typeof setTimeout> | null } }).turnTimer;
+        expect(turnTimer.handle).toBeNull();
+      }
+    }
+  });
+
+  it("12.3: bot seat acts automatically after think delay", async () => {
+    vi.useFakeTimers();
+    const { room, broadcastMsgs } = await setupBotMatch();
+
+    const ts = room.currentTableState!;
+    const toAct = ts.toAct;
+    if (toAct === null) return;
+
+    const seat = ts.seats[toAct];
+    if (!seat?.id.startsWith("bot-")) {
+      // The first actor is not a bot in this arrangement — skip
+      return;
+    }
+
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Advance past max bot think delay — bot should have acted
+    await vi.advanceTimersByTimeAsync(BOT_DECISION_DELAY_MAX_MS + 1);
+
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("12.4: all-bot table: startMatch → advance timers → at least one hand action taken automatically", async () => {
+    vi.useFakeTimers();
+    const { room, broadcastMsgs } = await setupAllBotMatch();
+
+    expect(room.currentTableState).not.toBeNull();
+
+    // All seats should be bots (player-0 is human, rest are bots; toAct might be any seat)
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Advance well past the max bot delay to allow several bot actions
+    await vi.advanceTimersByTimeAsync(BOT_DECISION_DELAY_MAX_MS * TABLE_SIZE + 100);
+
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+
+    // At least one action should have been automatically taken by bots
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("12.5: seatRngs has non-null entries only for bot seats after startMatch", async () => {
+    const { room } = await setupBotMatch();
+
+    const ts = room.currentTableState!;
+    const seatRngs = room.currentSeatRngs;
+
+    expect(seatRngs).toHaveLength(TABLE_SIZE);
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const seat = ts.seats[i];
+      if (seat?.id.startsWith("bot-")) {
+        expect(seatRngs[i]).not.toBeNull();
+        expect(typeof seatRngs[i]).toBe("function");
+      } else {
+        expect(seatRngs[i]).toBeNull();
+      }
+    }
+  });
+
+  it("12.6: executeBotAction is a no-op when it's not the bot's turn", async () => {
+    vi.useFakeTimers();
+    const { room, broadcastMsgs } = await setupBotMatch();
+
+    const ts = room.currentTableState!;
+    const toAct = ts.toAct!;
+
+    // Attempt to fire executeBotAction for a seat that is NOT toAct
+    const wrongSeat = (toAct + 1) % TABLE_SIZE;
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    (room as unknown as { executeBotAction(i: number): void }).executeBotAction(wrongSeat);
+
+    // No events should have been broadcast
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts).toHaveLength(0);
   });
 });
