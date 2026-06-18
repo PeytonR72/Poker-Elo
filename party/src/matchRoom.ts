@@ -118,6 +118,7 @@ export default class MatchRoom implements Party.Server {
     const connState = this.players.get(conn.id);
     if (connState?.authed && connState.playerId && !this.disconnectTimers.has(connState.playerId)) {
       const { playerId, seatIndex } = connState;
+      this.savedTimebankMs.set(playerId, connState.timebankMs);
       const timer = setTimeout(() => {
         this.disconnectTimers.delete(playerId);
         this.onDisconnectExpired(playerId, seatIndex);
