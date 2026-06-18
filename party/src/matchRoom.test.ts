@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
-import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT } from "@poker/shared";
+import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt } from "@poker/shared";
 import MatchRoom, { csprngSeed, nextNonBustedSeat } from "./matchRoom.js";
 import { TurnTimer } from "./timers.js";
 
@@ -1122,6 +1122,96 @@ describe("nextNonBustedSeat", () => {
 
     // Only seat 0 is active — fall back to currentButton (0)
     expect(nextNonBustedSeat(seats, 0)).toBe(0);
+  });
+});
+
+// ---------- Task 9: Match clock + blind escalation ─────────────────────
+
+describe("Match clock + blind escalation (Task 9)", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  // Test 9.1: First blind level
+  it("9.1: elapsedMs=0 returns first blind level (10/20) for turbo format", () => {
+    const format = MATCH_FORMATS["turbo"]!;
+    const { sb, bb } = blindLevelAt(0, format);
+    expect(sb).toBe(10);
+    expect(bb).toBe(20);
+  });
+
+  // Test 9.2: Second blind level after escalation
+  it("9.2: elapsedMs=130_000 (past first level for turbo) returns second level (15/30)", () => {
+    const format = MATCH_FORMATS["turbo"]!;
+    // Turbo: blindLevelDurationMs = 120_000, so at 130_000 we're in level 1 (index 1)
+    const { sb, bb } = blindLevelAt(130_000, format);
+    expect(sb).toBe(15);
+    expect(bb).toBe(30);
+  });
+
+  // Test 9.3: Grace-finish — hand completes after clock expires, endMatch called
+  it("9.3: hand completing after match clock expires triggers endMatch, no next hand", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    expect(room.currentTableState?.street).toBe("complete");
+    const handNumBefore = room.currentHandNumber;
+
+    // Clear pending timers
+    vi.clearAllTimers();
+
+    // Spy on endMatch
+    const endMatchSpy = vi.spyOn(room as unknown as { endMatch(): void }, "endMatch");
+
+    // Set matchStartMs to far past so elapsedMs >= matchDurationMs
+    const format = MATCH_FORMATS[DEFAULT_FORMAT]!;
+    (room as unknown as { matchStartMs: number }).matchStartMs =
+      Date.now() - format.matchDurationMs - 1;
+
+    // Call onHandComplete (clock is now expired)
+    (room as unknown as { onHandComplete(): void }).onHandComplete();
+
+    // endMatch must be called (grace-finish: hand already complete, so end match)
+    expect(endMatchSpy).toHaveBeenCalledOnce();
+
+    // Next hand must NOT start
+    await vi.advanceTimersByTimeAsync(3_000 + 1);
+    expect(room.currentHandNumber).toBe(handNumBefore);
+    expect(room.currentTableState?.street).toBe("complete");
+  });
+
+  // Test 9.4: In-progress hand completes before match ends (grace-finish in action)
+  it("9.4: hand completes with elapsedMs >= matchDurationMs triggers endMatch, no startNextHand", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    const ts = room.currentTableState!;
+    expect(ts.street).toBe("complete");
+
+    // Verify we're still within the match clock
+    const format = MATCH_FORMATS[ts.format]!;
+    const elapsedBefore = Date.now() - (room as unknown as { matchStartMs: number }).matchStartMs;
+    expect(elapsedBefore).toBeLessThan(format.matchDurationMs);
+
+    // Spy on endMatch
+    const endMatchSpy = vi.spyOn(room as unknown as { endMatch(): void }, "endMatch");
+
+    // Clear pending timers
+    vi.clearAllTimers();
+
+    // Manually set matchStartMs so that now elapsedMs >= matchDurationMs
+    (room as unknown as { matchStartMs: number }).matchStartMs =
+      Date.now() - format.matchDurationMs - 100;
+
+    const handNumBefore = room.currentHandNumber;
+
+    // Call onHandComplete with expired clock
+    (room as unknown as { onHandComplete(): void }).onHandComplete();
+
+    // endMatch should have been called
+    expect(endMatchSpy).toHaveBeenCalled();
+
+    // No startNextHand should be scheduled (no new hand after clock expires)
+    await vi.advanceTimersByTimeAsync(3_000 + 1);
+    expect(room.currentHandNumber).toBe(handNumBefore);
   });
 });
 
