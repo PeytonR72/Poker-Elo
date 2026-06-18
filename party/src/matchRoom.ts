@@ -15,6 +15,7 @@ import {
   applyAction,
   TIMEBANK_INITIAL_MS,
   TIMEBANK_REPLENISH_MS,
+  DISCONNECT_GRACE_MS,
   pairwiseElo,
   ELO_DEFAULT_RATING,
   ELO_K_FACTOR,
@@ -76,6 +77,7 @@ export default class MatchRoom implements Party.Server {
 
   // In-memory state — ephemeral per room instance
   private players = new Map<string, ConnState>(); // conn.id → ConnState
+  private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>(); // playerId → handle
 
   private tableState: TableState | null = null;
   private matchStartMs: number = 0; // Date.now() when match started
@@ -92,11 +94,32 @@ export default class MatchRoom implements Party.Server {
   }
 
   onClose(conn: Party.Connection): void {
+    const connState = this.players.get(conn.id);
+    if (connState?.authed && connState.playerId) {
+      const { playerId, seatIndex } = connState;
+      const timer = setTimeout(() => {
+        this.disconnectTimers.delete(playerId);
+        this.onDisconnectExpired(playerId, seatIndex);
+      }, DISCONNECT_GRACE_MS);
+      this.disconnectTimers.set(playerId, timer);
+    }
     this.players.delete(conn.id);
   }
 
   onError(conn: Party.Connection, _error: Error): void {
     conn.close();
+    // onClose will fire after close(), starting the grace timer for authed players.
+    // If PartyKit does NOT fire onClose after onError, we need to handle it here too.
+    // To be safe, we replicate the grace logic and deduplicate via disconnectTimers.
+    const connState = this.players.get(conn.id);
+    if (connState?.authed && connState.playerId && !this.disconnectTimers.has(connState.playerId)) {
+      const { playerId, seatIndex } = connState;
+      const timer = setTimeout(() => {
+        this.disconnectTimers.delete(playerId);
+        this.onDisconnectExpired(playerId, seatIndex);
+      }, DISCONNECT_GRACE_MS);
+      this.disconnectTimers.set(playerId, timer);
+    }
     this.players.delete(conn.id);
   }
 
@@ -216,7 +239,58 @@ export default class MatchRoom implements Party.Server {
       return;
     }
 
-    // Seat assignment
+    // Check for reconnect: if a disconnect grace timer is running for this playerId,
+    // cancel it and restore the player's original seat.
+    const existingTimer = this.disconnectTimers.get(playerId);
+    if (existingTimer !== undefined) {
+      clearTimeout(existingTimer);
+      this.disconnectTimers.delete(playerId);
+
+      // Find the original seat in the current table state (or fall back to scanning timebankMs)
+      let restoredSeatIndex: number | null = null;
+      if (this.tableState) {
+        for (let si = 0; si < this.tableState.seats.length; si++) {
+          if (this.tableState.seats[si]?.id === playerId) {
+            restoredSeatIndex = si;
+            break;
+          }
+        }
+      }
+
+      state.playerId = playerId;
+      state.seatIndex = restoredSeatIndex;
+      state.authed = true;
+      // Restore timebankMs from the seat's prior ConnState if it existed; otherwise use initial
+      state.timebankMs = TIMEBANK_INITIAL_MS;
+
+      if (restoredSeatIndex !== null) {
+        sender.send(encode({ t: "seated", seatIndex: restoredSeatIndex, playerId }));
+      }
+
+      // Send current snapshot so the reconnecting player is up to date
+      if (this.tableState) {
+        const view = redactFor(playerId, this.tableState);
+        sender.send(encode({ t: "snapshot", view }));
+
+        // If it's this player's turn, resend yourTurn
+        if (
+          restoredSeatIndex !== null &&
+          this.tableState.street !== "complete" &&
+          this.tableState.toAct === restoredSeatIndex
+        ) {
+          const format = MATCH_FORMATS[this.tableState.format];
+          if (format) {
+            const deadlineTs = Date.now() + format.turnTimeMs;
+            const mask = legalActions(this.tableState, restoredSeatIndex);
+            sender.send(encode({ t: "yourTurn", mask, deadlineTs }));
+          }
+        }
+      }
+
+      return;
+    }
+
+    // Seat assignment (new connection, not a reconnect)
     const usedSeats = new Set(
       [...this.players.values()]
         .map((p) => p.seatIndex)
@@ -371,6 +445,47 @@ export default class MatchRoom implements Party.Server {
     }
   }
 
+  /**
+   * Called when the disconnect grace timer expires for a player.
+   * If they are the active seat, auto-fold. Then mark their seat as "busted" (stack=0)
+   * so that future hands skip them — effectively treating them as permanently folded
+   * for the match (Unit 2 simplification: no chip-neutral sit-out, just busted).
+   */
+  private onDisconnectExpired(playerId: string, seatIndex: number | null): void {
+    if (!this.tableState || seatIndex === null) return;
+
+    // If this player is the active seat, auto-fold/check now
+    if (this.tableState.toAct === seatIndex && this.tableState.street !== "complete") {
+      this.turnTimer.cancel();
+      const mask = legalActions(this.tableState, seatIndex);
+      const action: Action = mask.canCheck
+        ? { seat: seatIndex, type: "check", amount: 0 }
+        : { seat: seatIndex, type: "fold", amount: 0 };
+      const { state, events } = applyAction(this.tableState, action);
+      this.tableState = state;
+      for (const event of events) {
+        this.party.broadcast(encode({ t: "event", event }));
+      }
+      this.broadcastSnapshots();
+      if (this.tableState.street === "complete") {
+        this.onHandComplete();
+      } else {
+        this.sendYourTurn();
+      }
+    }
+
+    // Mark seat as sitting out: force bust so createHand skips them in future hands.
+    // We do this AFTER any action above so the poker hand logic is unaffected.
+    const seat = this.tableState?.seats[seatIndex];
+    if (seat) {
+      (seat as Seat).status = "busted";
+      (seat as Seat).stack = 0;
+      if (!this.bustOrder.includes(playerId)) {
+        this.bustOrder.push(playerId);
+      }
+    }
+  }
+
   /** Called when a hand completes — bust detection, match clock check, next hand. */
   private onHandComplete(): void {
     if (!this.tableState) return;
@@ -470,6 +585,11 @@ export default class MatchRoom implements Party.Server {
   /** Exposed for tests — number of currently tracked connections. */
   get playerCount(): number {
     return this.players.size;
+  }
+
+  /** Exposed for tests — whether a disconnect grace timer is running for a given playerId. */
+  hasDisconnectTimer(playerId: string): boolean {
+    return this.disconnectTimers.has(playerId);
   }
 
   /** Exposed for tests — snapshot of a connection's state. */

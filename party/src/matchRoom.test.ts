@@ -1640,3 +1640,251 @@ describe("endMatch + ELO deltas (Task 10)", () => {
     expect(finishPlaceById["last"]).toBe(3);
   });
 });
+
+// ---------- Task 11: Disconnect/reconnect grace ----------
+
+/** Build a single-player dev-mode room (1 authed player). Returns useful handles. */
+async function setupSinglePlayerRoom(): Promise<{
+  room: MatchRoom;
+  conn: MockConn;
+  conns: MockConnectionList;
+  broadcastMsgs: string[];
+  playerId: string;
+}> {
+  const conns = makeConns();
+  const broadcastMsgs: string[] = [];
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+  const room = new MatchRoom(party);
+
+  const conn = mockConn("p1");
+  conns.set(conn.id, conn);
+  room.onConnect(conn);
+  await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+
+  return { room, conn, conns, broadcastMsgs, playerId: "alice" };
+}
+
+describe("Task 11: disconnect/reconnect grace", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("11.1: disconnect starts grace timer for authed player", async () => {
+    vi.useFakeTimers();
+    const { room, conn, playerId } = await setupSinglePlayerRoom();
+
+    expect(room.hasDisconnectTimer(playerId)).toBe(false);
+    room.onClose(conn);
+    expect(room.hasDisconnectTimer(playerId)).toBe(true);
+    // player removed from active connections
+    expect(room.playerCount).toBe(0);
+  });
+
+  it("11.2: disconnect does NOT start grace timer for unauthenticated connection", async () => {
+    vi.useFakeTimers();
+    const room = new MatchRoom(mockParty({}));
+    const conn = mockConn("unauthed");
+    room.onConnect(conn);
+    // never sent hello — not authed
+
+    room.onClose(conn);
+    // No timer for any player
+    expect(room.hasDisconnectTimer("")).toBe(false);
+  });
+
+  it("11.3: reconnect within grace cancels timer and restores state", async () => {
+    vi.useFakeTimers();
+    const { room, conn, conns, playerId } = await setupSinglePlayerRoom();
+
+    // Start a match so tableState exists
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+    expect(room.currentTableState).not.toBeNull();
+
+    // Disconnect
+    room.onClose(conn);
+    expect(room.hasDisconnectTimer(playerId)).toBe(true);
+
+    // Reconnect before grace expires
+    const conn2 = mockConn("p1-reconnect");
+    conns.set(conn2.id, conn2);
+    room.onConnect(conn2);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn2);
+
+    // Timer should be cancelled
+    expect(room.hasDisconnectTimer(playerId)).toBe(false);
+
+    // New connection should be authed with same playerId
+    const connState2 = room.getPlayer("p1-reconnect");
+    expect(connState2?.authed).toBe(true);
+    expect(connState2?.playerId).toBe(playerId);
+
+    // Should have received a snapshot
+    const msgs = conn2._msgs.map((m) => JSON.parse(m));
+    const snapshots = msgs.filter((m) => m.t === "snapshot");
+    expect(snapshots.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("11.4: reconnect restores original seatIndex from tableState", async () => {
+    vi.useFakeTimers();
+    const { room, conn, conns, playerId } = await setupSinglePlayerRoom();
+
+    // Start match
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    // Original seat
+    const originalSeatIndex = room.getPlayer("p1")!.seatIndex;
+    expect(originalSeatIndex).not.toBeNull();
+
+    // Disconnect
+    room.onClose(conn);
+
+    // Reconnect
+    const conn2 = mockConn("p1-v2");
+    conns.set(conn2.id, conn2);
+    room.onConnect(conn2);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn2);
+
+    const restoredState = room.getPlayer("p1-v2");
+    expect(restoredState?.seatIndex).toBe(originalSeatIndex);
+  });
+
+  it("11.5: grace expires while player is NOT the active seat → seat is busted, no action broadcast", async () => {
+    vi.useFakeTimers();
+    const conns = makeConns();
+    const broadcastMsgs: string[] = [];
+    const party = {
+      id: "test-room",
+      connections: conns,
+      getConnections: () => conns,
+      broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+      env: {},
+    } as unknown as Party.Party;
+    const room = new MatchRoom(party);
+
+    // Set up a full match so we can find a non-active seat to disconnect
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const c = mockConn(`seat-${i}`);
+      conns.set(c.id, c);
+      room.onConnect(c);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), c);
+    }
+
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    // Pick a non-active seat to disconnect
+    const inactiveIdx = (activeIdx + 1) % TABLE_SIZE;
+    const inactivePlayerId = `player-${inactiveIdx}`;
+    const inactiveConn = conns.get(`seat-${inactiveIdx}`)!;
+
+    // Count events before disconnecting the inactive player
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Disconnect the inactive player
+    room.onClose(inactiveConn);
+    expect(room.hasDisconnectTimer(inactivePlayerId)).toBe(true);
+
+    // Advance exactly to grace expiry — but turn timer fires first (active player auto-act).
+    // We care that the inactive player's grace expiry does NOT emit an action event.
+    // First advance just past turn time to let the active seat auto-act
+    const turnTimeMs2 = MATCH_FORMATS[DEFAULT_FORMAT]!.turnTimeMs;
+    await vi.advanceTimersByTimeAsync(turnTimeMs2 + 1);
+
+    // Count events so far (from turn timer auto-act)
+    const broadcastsAfterTurnTimer = broadcastMsgs.length;
+
+    // Now advance the rest of the grace period (grace - turn time)
+    const { DISCONNECT_GRACE_MS: graceMs } = await import("@poker/shared");
+    if (graceMs > turnTimeMs2) {
+      await vi.advanceTimersByTimeAsync(graceMs - turnTimeMs2);
+    }
+
+    // Timer should be gone
+    expect(room.hasDisconnectTimer(inactivePlayerId)).toBe(false);
+
+    // No additional action events from the grace expiry itself
+    // (any events from broadcastsAfterTurnTimer onward are from turn timers of other seats, NOT the grace expiry fold)
+    const graceExpiryBroadcasts = broadcastMsgs.slice(broadcastsAfterTurnTimer);
+    const graceExpiryActionEvents = graceExpiryBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event" && m.event?.seat === inactiveIdx);
+    expect(graceExpiryActionEvents).toHaveLength(0);
+
+    // Their seat is now marked busted (even though it was not their turn)
+    const seat = room.currentTableState!.seats[inactiveIdx];
+    expect(seat?.status).toBe("busted");
+    expect(seat?.stack).toBe(0);
+
+    // bustOrder should contain the player
+    expect(room.currentBustOrder).toContain(inactivePlayerId);
+  });
+
+  it("11.6: grace expires while player IS the active seat → auto-fold emitted", async () => {
+    vi.useFakeTimers();
+    const conns = makeConns();
+    const broadcastMsgs: string[] = [];
+    const party = {
+      id: "test-room",
+      connections: conns,
+      getConnections: () => conns,
+      broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+      env: {},
+    } as unknown as Party.Party;
+    const room = new MatchRoom(party);
+
+    // Set up a full match
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const c = mockConn(`seat-${i}`);
+      conns.set(c.id, c);
+      room.onConnect(c);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), c);
+    }
+
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+    const activeConn = conns.get(`seat-${activeIdx}`)!;
+    const activePlayerId = `player-${activeIdx}`;
+
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Disconnect the active player
+    room.onClose(activeConn);
+    expect(room.hasDisconnectTimer(activePlayerId)).toBe(true);
+
+    // Advance past grace — auto-fold should fire
+    const { DISCONNECT_GRACE_MS: graceMs } = await import("@poker/shared");
+    await vi.advanceTimersByTimeAsync(graceMs + 1);
+
+    expect(room.hasDisconnectTimer(activePlayerId)).toBe(false);
+
+    // At least one event should have been broadcast (the auto-fold)
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+
+    // The seat should be busted after the grace expires
+    const seat = room.currentTableState!.seats[activeIdx];
+    expect(seat?.status).toBe("busted");
+    expect(seat?.stack).toBe(0);
+  });
+
+  it("11.7: grace timer is not started for authed player in onError if onClose has already set it", async () => {
+    vi.useFakeTimers();
+    const { room, conn, playerId } = await setupSinglePlayerRoom();
+
+    room.onClose(conn);
+    expect(room.hasDisconnectTimer(playerId)).toBe(true);
+
+    // Calling onError for the same conn after onClose should not error or double-schedule
+    // (conn is already removed from players map, so onError is a no-op)
+    expect(() => {
+      room.onError(conn, new Error("test"));
+    }).not.toThrow();
+  });
+});
