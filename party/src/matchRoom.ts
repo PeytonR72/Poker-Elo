@@ -16,9 +16,23 @@ import {
   TIMEBANK_INITIAL_MS,
   TIMEBANK_REPLENISH_MS,
 } from "@poker/shared";
-import type { TableState, PublicView, Action, ActionMask } from "@poker/shared";
+import type { TableState, PublicView, Action, ActionMask, Seat } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { TurnTimer } from "./timers.js";
+
+/** UX pause between hands — not a poker-numeric rule, so defined locally. */
+const INTER_HAND_PAUSE_MS = 3_000;
+
+/** Advance button index past any busted seats, returning the next valid seat index. */
+function nextNonBustedSeat(seats: (Seat | null)[], currentButton: number): number {
+  const n = seats.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (currentButton + k) % n;
+    const s = seats[i];
+    if (s && s.status !== "busted") return i;
+  }
+  return currentButton; // fallback (shouldn't happen if >= 2 players)
+}
 
 type ConnState = {
   playerId: string; // Supabase user sub (from JWT)
@@ -354,9 +368,67 @@ export default class MatchRoom implements Party.Server {
     }
   }
 
-  /** Called when a hand completes. Stub — implemented in Task 8. */
+  /** Called when a hand completes — bust detection, match clock check, next hand. */
   private onHandComplete(): void {
-    // stub — implemented in Task 8
+    if (!this.tableState) return;
+    this.turnTimer.cancel();
+
+    // Detect newly busted seats
+    for (const seat of this.tableState.seats) {
+      if (!seat) continue;
+      if (seat.status === "busted" && !this.bustOrder.includes(seat.id)) {
+        this.bustOrder.push(seat.id);
+      }
+    }
+
+    const elapsedMs = Date.now() - this.matchStartMs;
+    const format = MATCH_FORMATS[this.tableState.format];
+    if (!format) return;
+    const matchOver = elapsedMs >= format.matchDurationMs || this.isMatchOver();
+    if (matchOver) {
+      this.endMatch();
+      return;
+    }
+
+    setTimeout(() => this.startNextHand(), INTER_HAND_PAUSE_MS);
+  }
+
+  /** Returns true when only 0 or 1 non-busted seats remain. */
+  private isMatchOver(): boolean {
+    if (!this.tableState) return true;
+    const active = this.tableState.seats.filter(s => s && s.status !== "busted");
+    return active.length <= 1;
+  }
+
+  /** Starts the next hand: rotates button, deals, broadcasts. */
+  private startNextHand(): void {
+    if (!this.tableState) return;
+    const elapsedMs = Date.now() - this.matchStartMs;
+    const seed = csprngSeed();
+    const deck = shuffledDeck(seed);
+    const format = MATCH_FORMATS[this.tableState.format];
+    if (!format) return;
+    const { sb, bb } = blindLevelAt(elapsedMs, format);
+    const nextButton = nextNonBustedSeat(this.tableState.seats, this.tableState.buttonIndex);
+    this.tableState = createHand({
+      seats: this.tableState.seats,
+      buttonIndex: nextButton,
+      sb,
+      bb,
+      deck,
+      handNumber: this.handNumber,
+      elapsedMs,
+      format: this.tableState.format,
+    });
+    this.handNumber++;
+    this.broadcastSnapshots();
+    this.sendDealPrivate();
+    this.sendYourTurn();
+  }
+
+  /** End-of-match cleanup stub — implemented in Task 10. */
+  private endMatch(): void {
+    // stub — implemented in Task 10
   }
 
   /** Exposed for tests — number of currently tracked connections. */
@@ -373,6 +445,16 @@ export default class MatchRoom implements Party.Server {
   get currentTableState(): TableState | null {
     return this.tableState;
   }
+
+  /** Exposed for tests — bust order array. */
+  get currentBustOrder(): string[] {
+    return this.bustOrder;
+  }
+
+  /** Exposed for tests — current hand number. */
+  get currentHandNumber(): number {
+    return this.handNumber;
+  }
 }
 
-export { csprngSeed };
+export { csprngSeed, nextNonBustedSeat };

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
 import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT } from "@poker/shared";
-import MatchRoom, { csprngSeed } from "./matchRoom.js";
+import MatchRoom, { csprngSeed, nextNonBustedSeat } from "./matchRoom.js";
 import { TurnTimer } from "./timers.js";
 
 // ---------- helpers ----------
@@ -1055,5 +1055,307 @@ describe("MatchRoom turn timer (Task 7)", () => {
       .map((m) => JSON.parse(m))
       .filter((m) => m.t === "event");
     expect(eventBroadcasts).toHaveLength(0);
+  });
+});
+
+// ---------- Task 8: nextNonBustedSeat pure helper ----------
+
+describe("nextNonBustedSeat", () => {
+  it("returns the next seat when no seats are busted", () => {
+    const seats = [
+      { id: "a", status: "active" },
+      { id: "b", status: "active" },
+      { id: "c", status: "active" },
+    ] as unknown as Parameters<typeof nextNonBustedSeat>[0];
+
+    expect(nextNonBustedSeat(seats, 0)).toBe(1);
+    expect(nextNonBustedSeat(seats, 1)).toBe(2);
+    expect(nextNonBustedSeat(seats, 2)).toBe(0);
+  });
+
+  it("skips a busted seat", () => {
+    const seats = [
+      { id: "a", status: "active" },
+      { id: "b", status: "busted" },
+      { id: "c", status: "active" },
+    ] as unknown as Parameters<typeof nextNonBustedSeat>[0];
+
+    // Button at 0 → skip busted seat 1 → land on 2
+    expect(nextNonBustedSeat(seats, 0)).toBe(2);
+    // Button at 1 → next is 2
+    expect(nextNonBustedSeat(seats, 1)).toBe(2);
+    // Button at 2 → next would be 0 (not busted)
+    expect(nextNonBustedSeat(seats, 2)).toBe(0);
+  });
+
+  it("skips multiple consecutive busted seats", () => {
+    const seats = [
+      { id: "a", status: "active" },
+      { id: "b", status: "busted" },
+      { id: "c", status: "busted" },
+      { id: "d", status: "active" },
+    ] as unknown as Parameters<typeof nextNonBustedSeat>[0];
+
+    // Button at 0 → skip 1,2 → land on 3
+    expect(nextNonBustedSeat(seats, 0)).toBe(3);
+    // Button at 3 → wraps around → land on 0
+    expect(nextNonBustedSeat(seats, 3)).toBe(0);
+  });
+
+  it("handles null seats (empty slots) as if busted", () => {
+    const seats = [
+      { id: "a", status: "active" },
+      null,
+      { id: "c", status: "active" },
+    ] as unknown as Parameters<typeof nextNonBustedSeat>[0];
+
+    // Button at 0 → skip null seat 1 → land on 2
+    expect(nextNonBustedSeat(seats, 0)).toBe(2);
+  });
+
+  it("falls back to currentButton when all other seats are busted", () => {
+    const seats = [
+      { id: "a", status: "active" },
+      { id: "b", status: "busted" },
+      { id: "c", status: "busted" },
+    ] as unknown as Parameters<typeof nextNonBustedSeat>[0];
+
+    // Only seat 0 is active — fall back to currentButton (0)
+    expect(nextNonBustedSeat(seats, 0)).toBe(0);
+  });
+});
+
+// ---------- Task 8: onHandComplete — bust detection + next-hand loop ----------
+
+/** Drive a full-table match room to the point where a hand has completed. */
+async function setupAndCompleteHand(): Promise<{
+  room: MatchRoom;
+  conns: MockConnectionList;
+  broadcastMsgs: string[];
+}> {
+  const conns = makeConns();
+  const broadcastMsgs: string[] = [];
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+  const room = new MatchRoom(party);
+
+  for (let i = 0; i < TABLE_SIZE; i++) {
+    const conn = mockConn(`seat-${i}`);
+    conns.set(conn.id, conn);
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+  }
+
+  // Drive the hand to completion: keep folding until street === "complete"
+  let guard = 0;
+  while (room.currentTableState?.street !== "complete" && guard++ < 500) {
+    const ts = room.currentTableState;
+    if (!ts || ts.toAct === null) break;
+    const idx = ts.toAct;
+    const mask = legalActions(ts, idx);
+    const conn = conns.get(`seat-${idx}`)!;
+    const actionType = mask.canCheck ? "check" : "fold";
+    await room.onMessage(encode({ t: "action", seat: idx, action: actionType, amount: 0 }), conn);
+  }
+
+  return { room, conns, broadcastMsgs };
+}
+
+describe("MatchRoom onHandComplete (Task 8)", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("normal hand completion schedules next hand after INTER_HAND_PAUSE_MS", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    expect(room.currentTableState?.street).toBe("complete");
+    const handNumBefore = room.currentHandNumber;
+
+    // Advance past the inter-hand pause
+    await vi.advanceTimersByTimeAsync(3_000 + 1);
+
+    // A new hand should have started (handNumber incremented in startNextHand)
+    expect(room.currentHandNumber).toBeGreaterThan(handNumBefore);
+    // New hand should be in preflop
+    expect(room.currentTableState?.street).toBe("preflop");
+  });
+
+  it("next hand does NOT start before INTER_HAND_PAUSE_MS elapses", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    expect(room.currentTableState?.street).toBe("complete");
+    const handNumBefore = room.currentHandNumber;
+
+    // Advance only 1 second — not enough
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(room.currentHandNumber).toBe(handNumBefore); // no new hand yet
+    expect(room.currentTableState?.street).toBe("complete");
+  });
+
+  it("bust detection: busted seat id appears in bustOrder after hand completes", async () => {
+    vi.useFakeTimers();
+    const conns = makeConns();
+    const party = {
+      id: "test-room",
+      connections: conns,
+      getConnections: () => conns,
+      broadcast: () => {},
+      env: {},
+    } as unknown as Party.Party;
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    // Manually mark a seat as busted in the table state to simulate chip elimination
+    const ts = room.currentTableState!;
+    const bustTarget = ts.seats[TABLE_SIZE - 1];
+    if (bustTarget) {
+      (bustTarget as { status: string }).status = "busted";
+    }
+
+    // Mark the hand as complete to trigger onHandComplete via action
+    // Instead: drive all but one player to fold (which triggers onHandComplete naturally)
+    // Reset the bust status and do it properly via the internal private access
+    if (bustTarget) {
+      (bustTarget as { status: string }).status = "active";
+    }
+
+    // Drive the hand to completion
+    let guard = 0;
+    while (room.currentTableState?.street !== "complete" && guard++ < 500) {
+      const s = room.currentTableState;
+      if (!s || s.toAct === null) break;
+      const idx = s.toAct;
+      const mask = legalActions(s, idx);
+      const conn = conns.get(`seat-${idx}`)!;
+      const actionType = mask.canCheck ? "check" : "fold";
+      await room.onMessage(encode({ t: "action", seat: idx, action: actionType, amount: 0 }), conn);
+    }
+
+    // After completing the hand, set a seat as busted in the completed state and manually call
+    // onHandComplete — the simplest way is to use the private accessor via any cast
+    const finalTs = room.currentTableState!;
+    const seatToMark = finalTs.seats[TABLE_SIZE - 1];
+    if (seatToMark) {
+      (seatToMark as { status: string }).status = "busted";
+    }
+
+    // Call onHandComplete via any cast (it's private but we need to test it)
+    (room as unknown as { onHandComplete(): void }).onHandComplete();
+
+    // bustOrder should now contain that player's id
+    if (seatToMark) {
+      expect(room.currentBustOrder).toContain(seatToMark.id);
+    }
+  });
+
+  it("isMatchOver returns true when only 1 non-busted seat remains", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    const ts = room.currentTableState!;
+    // Bust all but one seat
+    let keptOne = false;
+    for (const seat of ts.seats) {
+      if (!seat) continue;
+      if (!keptOne) {
+        keptOne = true;
+        continue;
+      }
+      (seat as { status: string }).status = "busted";
+    }
+
+    const isOver = (room as unknown as { isMatchOver(): boolean }).isMatchOver();
+    expect(isOver).toBe(true);
+  });
+
+  it("isMatchOver returns false when >= 2 non-busted seats remain", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    const ts = room.currentTableState!;
+    // Bust all but two seats
+    let keptTwo = 0;
+    for (const seat of ts.seats) {
+      if (!seat) continue;
+      if (keptTwo < 2) {
+        keptTwo++;
+        continue;
+      }
+      (seat as { status: string }).status = "busted";
+    }
+
+    const isOver = (room as unknown as { isMatchOver(): boolean }).isMatchOver();
+    expect(isOver).toBe(false);
+  });
+
+  it("match clock expired → endMatch called, no next hand scheduled", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    expect(room.currentTableState?.street).toBe("complete");
+
+    // Clear the pending inter-hand pause timer that onHandComplete already scheduled
+    vi.clearAllTimers();
+
+    // Spy on endMatch
+    const endMatchSpy = vi.spyOn(room as unknown as { endMatch(): void }, "endMatch");
+
+    // Set matchStartMs far in the past so elapsedMs >= matchDurationMs
+    const format = MATCH_FORMATS[DEFAULT_FORMAT]!;
+    (room as unknown as { matchStartMs: number }).matchStartMs =
+      Date.now() - format.matchDurationMs - 1;
+
+    const handNumBefore = room.currentHandNumber;
+
+    // Trigger onHandComplete again (clock is now expired)
+    (room as unknown as { onHandComplete(): void }).onHandComplete();
+
+    // endMatch should have been called
+    expect(endMatchSpy).toHaveBeenCalledOnce();
+
+    // No next hand should start even after the pause
+    await vi.advanceTimersByTimeAsync(3_000 + 1);
+    expect(room.currentHandNumber).toBe(handNumBefore);
+    expect(room.currentTableState?.street).toBe("complete");
+  });
+
+  it("button advances past busted seats on next hand", async () => {
+    vi.useFakeTimers();
+    const { room } = await setupAndCompleteHand();
+
+    const ts = room.currentTableState!;
+    const currentButton = ts.buttonIndex;
+
+    // Mark the next seat as busted
+    const nextSeatIdx = (currentButton + 1) % TABLE_SIZE;
+    const nextSeat = ts.seats[nextSeatIdx];
+    if (nextSeat) {
+      (nextSeat as { status: string }).status = "busted";
+    }
+
+    // Reset bustOrder so we get a fresh start
+    (room as unknown as { bustOrder: string[] }).bustOrder = [];
+
+    // Advance past inter-hand pause to trigger startNextHand
+    await vi.advanceTimersByTimeAsync(3_000 + 1);
+
+    // The new button should skip the busted seat
+    const newTs = room.currentTableState;
+    if (newTs && newTs.street === "preflop") {
+      expect(newTs.buttonIndex).not.toBe(nextSeatIdx);
+    }
   });
 });
