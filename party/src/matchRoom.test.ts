@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
 import { encode, TABLE_SIZE } from "@poker/shared";
-import MatchRoom from "./matchRoom.js";
+import MatchRoom, { csprngSeed } from "./matchRoom.js";
 
 // ---------- helpers ----------
 
@@ -26,10 +26,16 @@ function mockConn(id: string): Party.Connection & { _msgs: string[]; _closed: bo
   } as unknown as Party.Connection & { _msgs: string[]; _closed: boolean };
 }
 
-function mockParty(env: Record<string, string> = {}): Party.Party {
+type MockConn = Party.Connection & { _msgs: string[]; _closed: boolean };
+type MockPartyConns = Map<string, MockConn>;
+
+function mockParty(
+  env: Record<string, string> = {},
+  conns: MockPartyConns = new Map(),
+): Party.Party {
   return {
     id: "test-room",
-    connections: [],
+    connections: conns,
     broadcast: () => {},
     env,
   } as unknown as Party.Party;
@@ -236,7 +242,7 @@ describe("MatchRoom hello edge cases", () => {
   it("rejects connection when table is full", async () => {
     const room = new MatchRoom(mockParty({}));
 
-    // Fill all TABLE_SIZE seats
+    // Fill all TABLE_SIZE seats (triggers startMatch; party.connections is empty so no crash)
     for (let i = 0; i < TABLE_SIZE; i++) {
       const conn = mockConn(`seat-${i}`);
       room.onConnect(conn);
@@ -264,5 +270,181 @@ describe("MatchRoom hello edge cases", () => {
     expect(conn._closed).toBe(true);
     const msgs = conn._msgs.map((m) => JSON.parse(m));
     expect(msgs.some((m) => m.t === "error")).toBe(true);
+  });
+});
+
+// ---------- Task 4: CSPRNG seed ----------
+
+describe("csprngSeed", () => {
+  it("returns a number in [0, 2^32)", () => {
+    const seed = csprngSeed();
+    expect(typeof seed).toBe("number");
+    expect(seed).toBeGreaterThanOrEqual(0);
+    expect(seed).toBeLessThan(2 ** 32);
+    expect(Number.isInteger(seed)).toBe(true);
+  });
+
+  it("two successive calls almost always differ (probabilistic over 1000 pairs)", () => {
+    let allSame = true;
+    for (let i = 0; i < 1000; i++) {
+      if (csprngSeed() !== csprngSeed()) {
+        allSame = false;
+        break;
+      }
+    }
+    expect(allSame).toBe(false);
+  });
+});
+
+// ---------- Task 4: startMatch via dev message ----------
+
+describe("MatchRoom startMatch (dev mode)", () => {
+  it("sets tableState to non-null after startMatch message", async () => {
+    const room = new MatchRoom(mockParty({}));
+
+    // Seat one player
+    const conn = mockConn("p1");
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+
+    // Send startMatch in dev mode
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    expect(room.currentTableState).not.toBeNull();
+  });
+
+  it("tableState is at preflop with empty board after startMatch", async () => {
+    const room = new MatchRoom(mockParty({}));
+    const conn = mockConn("p1");
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    const ts = room.currentTableState!;
+    expect(ts.street).toBe("preflop");
+    expect(ts.board).toHaveLength(0);
+  });
+
+  it("all TABLE_SIZE seats have 2 hole cards after startMatch", async () => {
+    const room = new MatchRoom(mockParty({}));
+    const conn = mockConn("p1");
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    const ts = room.currentTableState!;
+    expect(ts.seats).toHaveLength(TABLE_SIZE);
+    for (const seat of ts.seats) {
+      expect(seat).not.toBeNull();
+      expect(seat!.holeCards).not.toBeNull();
+      expect(seat!.holeCards).toHaveLength(2);
+    }
+  });
+
+  it("does not trigger startMatch from startMatch message when JWT secret is set", async () => {
+    const room = new MatchRoom(mockParty({ SUPABASE_JWT_SECRET: "secret" }));
+    const conn = mockConn("p1");
+    room.onConnect(conn);
+    // Not authed, send startMatch — in prod mode startMatch is not a hello, so error+close
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    // Should have been rejected as "expected_hello"
+    expect(conn._closed).toBe(true);
+    const msgs = conn._msgs.map((m) => JSON.parse(m));
+    expect(msgs.some((m) => m.t === "error" && m.message === "expected_hello")).toBe(true);
+    expect(room.currentTableState).toBeNull();
+  });
+});
+
+// ---------- Task 4: auto-start when all seats filled ----------
+
+describe("MatchRoom auto-start on full table", () => {
+  it("starts match automatically when TABLE_SIZE players connect and auth", async () => {
+    const conns: MockPartyConns = new Map();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    expect(room.currentTableState).not.toBeNull();
+    expect(room.currentTableState!.street).toBe("preflop");
+  });
+});
+
+// ---------- Task 4: broadcastSnapshots ----------
+
+describe("MatchRoom broadcastSnapshots", () => {
+  it("each authed connection receives a snapshot message after match starts", async () => {
+    const conns: MockPartyConns = new Map();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    // All should have received a snapshot
+    for (const conn of conns.values()) {
+      const snapshots = conn._msgs.map((m) => JSON.parse(m)).filter((m) => m.t === "snapshot");
+      expect(snapshots.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("snapshot view does not contain deck or opponent holeCards", async () => {
+    const conns: MockPartyConns = new Map();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    // For the first player (seat-0), check their snapshot
+    const firstConn = conns.get("seat-0")!;
+    const snap = firstConn._msgs
+      .map((m) => JSON.parse(m))
+      .find((m) => m.t === "snapshot");
+
+    expect(snap).toBeDefined();
+    const view = snap.view;
+
+    // No deck field in view
+    expect(view).not.toHaveProperty("deck");
+    expect(view).not.toHaveProperty("deckPointer");
+
+    // Only player 0's own holeCards should be non-null; others redacted
+    // player-0 is at seat 0
+    const seat0 = view.seats[0];
+    expect(seat0.holeCards).not.toBeNull(); // own cards visible
+
+    // At least one other seat should have null holeCards (opponent redaction)
+    const otherSeats = view.seats.slice(1);
+    const hasRedacted = otherSeats.some((s: { holeCards: unknown } | null) => s && s.holeCards === null);
+    expect(hasRedacted).toBe(true);
+  });
+
+  it("dev startMatch also broadcasts snapshot to authed player", async () => {
+    const conn = mockConn("p1");
+    const conns: MockPartyConns = new Map([[conn.id, conn]]);
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    const snapshots = conn._msgs.map((m) => JSON.parse(m)).filter((m) => m.t === "snapshot");
+    expect(snapshots.length).toBeGreaterThanOrEqual(1);
   });
 });

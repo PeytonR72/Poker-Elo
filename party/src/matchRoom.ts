@@ -1,5 +1,18 @@
 import type * as Party from "partykit/server";
-import { encode, decode, TABLE_SIZE } from "@poker/shared";
+import {
+  encode,
+  decode,
+  TABLE_SIZE,
+  shuffledDeck,
+  createHand,
+  createSeat,
+  redactFor,
+  STARTING_STACK,
+  DEFAULT_FORMAT,
+  MATCH_FORMATS,
+  blindLevelAt,
+} from "@poker/shared";
+import type { TableState, PublicView } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 
 type ConnState = {
@@ -8,11 +21,23 @@ type ConnState = {
   authed: boolean;
 };
 
+/** XOR-fold 128 bits of CSPRNG entropy into a 32-bit seed for mulberry32. */
+function csprngSeed(): number {
+  const buf = new Uint32Array(4);
+  crypto.getRandomValues(buf);
+  return (buf[0]! ^ buf[1]! ^ buf[2]! ^ buf[3]!) >>> 0;
+}
+
 export default class MatchRoom implements Party.Server {
   static options = { hibernate: false } satisfies Party.ServerOptions;
 
   // In-memory state — ephemeral per room instance
   private players = new Map<string, ConnState>(); // conn.id → ConnState
+
+  private tableState: TableState | null = null;
+  private matchStartMs: number = 0; // Date.now() when match started
+  private bustOrder: string[] = []; // playerId in bust order (first busted = last place)
+  private handNumber: number = 0;
 
   constructor(readonly party: Party.Party) {}
 
@@ -37,6 +62,15 @@ export default class MatchRoom implements Party.Server {
     } catch {
       sender.send(encode({ t: "error", message: "invalid_message" }));
       sender.close();
+      return;
+    }
+
+    const isDev = !this.party.env["SUPABASE_JWT_SECRET"] ||
+      this.party.env["SUPABASE_JWT_SECRET"] === "";
+
+    // Dev-only: allow a "startMatch" trigger without filling the table
+    if (msg.t === "startMatch" && isDev) {
+      this.startMatch();
       return;
     }
 
@@ -98,6 +132,55 @@ export default class MatchRoom implements Party.Server {
     state.authed = true;
 
     sender.send(encode({ t: "seated", seatIndex, playerId }));
+
+    // Start match when all TABLE_SIZE seats are filled
+    const authedCount = [...this.players.values()].filter((p) => p.authed).length;
+    if (authedCount === TABLE_SIZE) {
+      this.startMatch();
+    }
+  }
+
+  /** Start the match: build seats, deal first hand, broadcast snapshots. */
+  private startMatch(): void {
+    const format = MATCH_FORMATS[DEFAULT_FORMAT]!;
+    const elapsedMs = 0; // first hand
+    const { sb, bb } = blindLevelAt(elapsedMs, format);
+
+    const seats = Array.from({ length: TABLE_SIZE }, (_, i) => {
+      const player = [...this.players.values()].find((p) => p.seatIndex === i);
+      const id = player?.playerId ?? `bot-${i}`;
+      const isBot = !player;
+      return createSeat(id, isBot, STARTING_STACK);
+    });
+
+    const seed = csprngSeed();
+    const deck = shuffledDeck(seed);
+    const buttonIndex = 0; // first hand: seat 0 is button
+
+    this.matchStartMs = Date.now();
+    this.tableState = createHand({
+      seats,
+      buttonIndex,
+      sb,
+      bb,
+      deck,
+      handNumber: this.handNumber,
+      elapsedMs,
+      format: DEFAULT_FORMAT,
+    });
+
+    this.broadcastSnapshots();
+  }
+
+  /** Send a redacted snapshot to each authed connected player. */
+  private broadcastSnapshots(): void {
+    if (!this.tableState) return;
+    for (const [connId, connState] of this.players) {
+      if (!connState.authed) continue;
+      const view: PublicView = redactFor(connState.playerId, this.tableState);
+      const conn = this.party.connections.get(connId);
+      conn?.send(encode({ t: "snapshot", view }));
+    }
   }
 
   /** Exposed for tests — number of currently tracked connections. */
@@ -109,4 +192,11 @@ export default class MatchRoom implements Party.Server {
   getPlayer(connId: string): ConnState | undefined {
     return this.players.get(connId);
   }
+
+  /** Exposed for tests — the current table state. */
+  get currentTableState(): TableState | null {
+    return this.tableState;
+  }
 }
+
+export { csprngSeed };
