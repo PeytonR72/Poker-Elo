@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
-import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt, BOT_DECISION_DELAY_MIN_MS, BOT_DECISION_DELAY_MAX_MS } from "@poker/shared";
+import { encode, TABLE_SIZE, STARTING_STACK, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt, BOT_DECISION_DELAY_MIN_MS, BOT_DECISION_DELAY_MAX_MS } from "@poker/shared";
 import MatchRoom, { csprngSeed, nextNonBustedSeat } from "./matchRoom.js";
 import { botThinkDelayMs } from "./botRunner.js";
 import { TurnTimer } from "./timers.js";
@@ -2070,5 +2070,131 @@ describe("Task 12: Bot runner", () => {
       .map((m) => JSON.parse(m))
       .filter((m) => m.t === "event");
     expect(eventBroadcasts).toHaveLength(0);
+  });
+});
+
+// ---------- Task 13: Integration smoke test ----------
+
+describe("Task 13: integration smoke test", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("full match: 1 human + 5 bots → matchOver + chip conservation", async () => {
+    vi.useFakeTimers();
+
+    const broadcastMsgs: string[] = [];
+    // allHumanMsgs accumulates every message sent to the human (for chip conservation checks)
+    const allHumanMsgs: string[] = [];
+    // humanMsgs is used as a queue that gets drained each loop iteration
+    const humanMsgs: string[] = [];
+
+    const humanConn = {
+      id: "h0",
+      send: (m: string) => { humanMsgs.push(m); allHumanMsgs.push(m); },
+      close: () => {},
+      socket: {} as unknown,
+      state: null,
+      setState: () => {},
+    } as unknown as Party.Connection & { _msgs: string[] };
+
+    const conns = new MockConnectionList();
+    conns.set("h0", humanConn as unknown as MockConn);
+
+    const party = {
+      id: "test-room",
+      connections: conns,
+      getConnections: () => conns,
+      broadcast: (m: string) => broadcastMsgs.push(m),
+      env: {} as Record<string, unknown>,
+    } as unknown as Party.Party;
+
+    const room = new MatchRoom(party) as any;
+
+    // Connect and auth human
+    room.onConnect(humanConn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:human-0" }), humanConn);
+
+    // Start match (dev mode: 1 human + 5 bots)
+    await room.onMessage(encode({ t: "startMatch" }), humanConn);
+
+    const TOTAL = TABLE_SIZE * STARTING_STACK;
+
+    // Drive match loop: advance fake timers, respond to yourTurn as human
+    let iterations = 0;
+    let matchOverBroadcast: string | null = null;
+
+    while (!matchOverBroadcast && iterations < 500) {
+      iterations++;
+      await vi.runAllTimersAsync();
+
+      // Check if matchOver was broadcast
+      matchOverBroadcast = broadcastMsgs.find(m => JSON.parse(m).t === "matchOver") ?? null;
+      if (matchOverBroadcast) break;
+
+      // Respond to any pending yourTurn messages sent to human
+      const pendingYourTurn = humanMsgs.findIndex(m => JSON.parse(m).t === "yourTurn");
+      if (pendingYourTurn !== -1) {
+        const parsed = JSON.parse(humanMsgs[pendingYourTurn]!);
+        // Clear processed messages
+        humanMsgs.splice(0, pendingYourTurn + 1);
+        const mask = parsed.mask;
+        const action = mask.canCheck
+          ? { t: "action" as const, seat: 0, action: "check" as const, amount: 0 }
+          : mask.canCall
+          ? { t: "action" as const, seat: 0, action: "call" as const, amount: mask.callAmount as number }
+          : { t: "action" as const, seat: 0, action: "fold" as const, amount: 0 };
+        await room.onMessage(encode(action), humanConn);
+      }
+    }
+
+    expect(iterations).toBeLessThan(500);
+    expect(matchOverBroadcast).not.toBeNull();
+
+    const mo = JSON.parse(matchOverBroadcast!);
+
+    // Check finishPlaceById: all 6 seat IDs with finite places
+    const places = mo.finishPlaceById as Record<string, number>;
+    expect(Object.keys(places)).toHaveLength(6);
+    for (const place of Object.values(places)) {
+      expect(typeof place).toBe("number");
+      expect(Number.isFinite(place)).toBe(true);
+    }
+
+    // Check eloDeltas: all 6 seat IDs with finite non-NaN numbers
+    const deltas = mo.eloDeltas as Record<string, number>;
+    expect(Object.keys(deltas)).toHaveLength(6);
+    for (const delta of Object.values(deltas)) {
+      expect(Number.isFinite(delta)).toBe(true);
+      expect(Number.isNaN(delta)).toBe(false);
+    }
+
+    // Chip conservation: check snapshot messages sent to human.
+    // Note: broadcastSnapshots() sends per-conn via conn.send(), not party.broadcast().
+    // Snapshots are accumulated in allHumanMsgs.
+    //
+    // During active betting, PublicView only exposes committedThisStreet (not committedTotal),
+    // so mid-hand snapshots (flop/turn/river) cannot be verified from the public view alone
+    // (previous-street committed chips appear "missing"). We therefore check conservation
+    // only at "complete" (between-hand) snapshots where all chips are back in stacks.
+    const allSnapshots = allHumanMsgs
+      .map(m => JSON.parse(m))
+      .filter(m => m.t === "snapshot");
+
+    const completedSnapshots = allSnapshots.filter(
+      (m) => (m.view as { street: string }).street === "complete"
+    );
+    // Expect several complete-street snapshots (one per hand except possibly the first/last)
+    expect(completedSnapshots.length).toBeGreaterThan(3);
+
+    for (const snap of completedSnapshots.slice(0, Math.min(completedSnapshots.length, 10))) {
+      const view = snap.view as {
+        seats: Array<{ stack: number } | null>;
+        pots: Array<{ amount: number }>;
+      };
+      const seatTotal = view.seats
+        .filter(Boolean)
+        .reduce((sum, s) => sum + s!.stack, 0);
+      const potTotal = view.pots.reduce((sum, p) => sum + p.amount, 0);
+      expect(seatTotal + potTotal).toBe(TOTAL);
+    }
   });
 });
