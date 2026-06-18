@@ -18,7 +18,7 @@ export type ServerMsg =
   | { t: "event"; event: GameEvent }
   | { t: "yourTurn"; mask: ActionMask; deadlineTs: number }
   | { t: "timebankUsed"; seatIdx: number; remainingMs: number }
-  | { t: "matchOver"; placements: unknown; eloDeltas?: unknown }
+  | { t: "matchOver"; finishPlaceById: Record<string, number>; eloDeltas: Record<string, number> }
   | { t: "error"; message: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {

@@ -15,8 +15,11 @@ import {
   applyAction,
   TIMEBANK_INITIAL_MS,
   TIMEBANK_REPLENISH_MS,
+  pairwiseElo,
+  ELO_DEFAULT_RATING,
+  ELO_K_FACTOR,
 } from "@poker/shared";
-import type { TableState, PublicView, Action, ActionMask, Seat } from "@poker/shared";
+import type { TableState, PublicView, Action, ActionMask, Seat, EloPlayer } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { TurnTimer } from "./timers.js";
 
@@ -426,9 +429,42 @@ export default class MatchRoom implements Party.Server {
     this.sendYourTurn();
   }
 
-  /** End-of-match cleanup stub — implemented in Task 10. */
+  /** Determine finishing places, compute ELO deltas, and broadcast matchOver. */
   private endMatch(): void {
-    // stub — implemented in Task 10
+    if (!this.tableState) return;
+    this.turnTimer.cancel();
+
+    const finishPlaceById: Record<string, number> = {};
+
+    // Survivors: non-busted seats sorted by stack descending → places 1..n (ties get same place)
+    const survivors = this.tableState.seats
+      .filter((s): s is Seat => s !== null && s.status !== "busted")
+      .sort((a, b) => b.stack - a.stack);
+
+    let place = 1;
+    for (let i = 0; i < survivors.length; i++) {
+      if (i > 0 && survivors[i]!.stack < survivors[i - 1]!.stack) place = i + 1;
+      finishPlaceById[survivors[i]!.id] = place;
+    }
+
+    // Busted: reverse bust order (last to bust = best among busted)
+    const reversedBust = [...this.bustOrder].reverse();
+    for (let i = 0; i < reversedBust.length; i++) {
+      finishPlaceById[reversedBust[i]!] = survivors.length + 1 + i;
+    }
+
+    // Build ELO player list from all non-null seats
+    const players: EloPlayer[] = this.tableState.seats
+      .filter((s): s is Seat => s !== null)
+      .map(s => ({ id: s.id, rating: ELO_DEFAULT_RATING }));
+
+    const deltas = pairwiseElo(players, finishPlaceById, () => ELO_K_FACTOR);
+
+    this.party.broadcast(encode({
+      t: "matchOver",
+      finishPlaceById,
+      eloDeltas: deltas,
+    }));
   }
 
   /** Exposed for tests — number of currently tracked connections. */

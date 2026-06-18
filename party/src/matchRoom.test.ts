@@ -1449,3 +1449,194 @@ describe("MatchRoom onHandComplete (Task 8)", () => {
     }
   });
 });
+
+// ---------- Task 10: endMatch + ELO deltas + matchOver broadcast ----------
+
+/** Build a minimal MatchRoom with injected tableState and bustOrder for endMatch testing. */
+function makeEndMatchRoom(
+  survivors: Array<{ id: string; stack: number }>,
+  bustedIds: string[], // bust order (first = first to bust = worst place among busted)
+): { room: MatchRoom; broadcastMsgs: string[] } {
+  const broadcastMsgs: string[] = [];
+  const conns = makeConns();
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+
+  const room = new MatchRoom(party);
+
+  // Build a minimal tableState with all seats
+  const allSeats = [
+    ...survivors.map(s => ({
+      id: s.id,
+      stack: s.stack,
+      status: "active" as const,
+      holeCards: null,
+      committedThisStreet: 0,
+      committedTotal: 0,
+      isBot: false,
+    })),
+    ...bustedIds.map(id => ({
+      id,
+      stack: 0,
+      status: "busted" as const,
+      holeCards: null,
+      committedThisStreet: 0,
+      committedTotal: 0,
+      isBot: false,
+    })),
+  ];
+
+  // Inject state via private accessor
+  (room as unknown as { tableState: unknown }).tableState = {
+    seats: allSeats,
+    street: "complete",
+    board: [],
+    pots: [],
+    buttonIndex: 0,
+    toAct: null,
+    handNumber: 1,
+    elapsedMs: 0,
+    format: "turbo",
+  };
+  (room as unknown as { bustOrder: string[] }).bustOrder = [...bustedIds];
+
+  return { room, broadcastMsgs };
+}
+
+describe("endMatch + ELO deltas (Task 10)", () => {
+  it("10.1: 3 survivors (500/300/200) + 3 busted (A,B,C) → places 1/2/3 for survivors, 4/5/6 for busted (C=4,B=5,A=6)", () => {
+    const { room, broadcastMsgs } = makeEndMatchRoom(
+      [
+        { id: "p1", stack: 500 },
+        { id: "p2", stack: 300 },
+        { id: "p3", stack: 200 },
+      ],
+      ["pA", "pB", "pC"], // A busted first = last place, C busted last = best among busted
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    expect(broadcastMsgs).toHaveLength(1);
+    const msg = JSON.parse(broadcastMsgs[0]!);
+    expect(msg.t).toBe("matchOver");
+
+    const { finishPlaceById } = msg;
+    // Survivors by stack descending
+    expect(finishPlaceById["p1"]).toBe(1);
+    expect(finishPlaceById["p2"]).toBe(2);
+    expect(finishPlaceById["p3"]).toBe(3);
+    // Busted: reversed order — C busted last = place 4, B = 5, A = 6
+    expect(finishPlaceById["pC"]).toBe(4);
+    expect(finishPlaceById["pB"]).toBe(5);
+    expect(finishPlaceById["pA"]).toBe(6);
+  });
+
+  it("10.2: tied survivors (same stack) get the same place number", () => {
+    const { room, broadcastMsgs } = makeEndMatchRoom(
+      [
+        { id: "p1", stack: 500 },
+        { id: "p2", stack: 500 }, // tied with p1
+        { id: "p3", stack: 200 },
+      ],
+      [],
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    const msg = JSON.parse(broadcastMsgs[0]!);
+    const { finishPlaceById } = msg;
+    // p1 and p2 are tied at 500 → both get place 1
+    expect(finishPlaceById["p1"]).toBe(1);
+    expect(finishPlaceById["p2"]).toBe(1);
+    // p3 is lower → place 3 (i=2, so place = i+1 = 3)
+    expect(finishPlaceById["p3"]).toBe(3);
+  });
+
+  it("10.3: matchOver broadcast contains finishPlaceById and eloDeltas for all seats", () => {
+    const { room, broadcastMsgs } = makeEndMatchRoom(
+      [
+        { id: "p1", stack: 500 },
+        { id: "p2", stack: 300 },
+        { id: "p3", stack: 200 },
+      ],
+      ["pA", "pB", "pC"],
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    expect(broadcastMsgs).toHaveLength(1);
+    const msg = JSON.parse(broadcastMsgs[0]!);
+    expect(msg.t).toBe("matchOver");
+    expect(msg.finishPlaceById).toBeDefined();
+    expect(msg.eloDeltas).toBeDefined();
+
+    // All 6 players should have entries
+    const allIds = ["p1", "p2", "p3", "pA", "pB", "pC"];
+    for (const id of allIds) {
+      expect(msg.finishPlaceById).toHaveProperty(id);
+      expect(msg.eloDeltas).toHaveProperty(id);
+    }
+  });
+
+  it("10.4: ELO deltas are all finite non-NaN numbers", () => {
+    const { room, broadcastMsgs } = makeEndMatchRoom(
+      [
+        { id: "p1", stack: 500 },
+        { id: "p2", stack: 300 },
+        { id: "p3", stack: 200 },
+      ],
+      ["pA", "pB", "pC"],
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    const msg = JSON.parse(broadcastMsgs[0]!);
+    const { eloDeltas } = msg;
+
+    for (const [, delta] of Object.entries(eloDeltas)) {
+      expect(typeof delta).toBe("number");
+      expect(Number.isNaN(delta)).toBe(false);
+      expect(Number.isFinite(delta)).toBe(true);
+    }
+  });
+
+  it("10.5: endMatch is a no-op when tableState is null", () => {
+    const broadcastMsgs: string[] = [];
+    const party = {
+      id: "test-room",
+      connections: makeConns(),
+      getConnections: () => makeConns(),
+      broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+      env: {},
+    } as unknown as Party.Party;
+    const room = new MatchRoom(party);
+    // tableState is null by default
+
+    expect(() => {
+      (room as unknown as { endMatch(): void }).endMatch();
+    }).not.toThrow();
+    expect(broadcastMsgs).toHaveLength(0);
+  });
+
+  it("10.6: single survivor (match won) gets place 1, all others from bustOrder", () => {
+    const { room, broadcastMsgs } = makeEndMatchRoom(
+      [{ id: "winner", stack: 3000 }],
+      ["last", "second-to-last"], // last busted first
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    const msg = JSON.parse(broadcastMsgs[0]!);
+    const { finishPlaceById } = msg;
+    expect(finishPlaceById["winner"]).toBe(1);
+    // second-to-last busted last → place 2 (survivors.length+1+0 = 1+1+0 = 2)
+    expect(finishPlaceById["second-to-last"]).toBe(2);
+    // last busted first → place 3 (1+1+1 = 3)
+    expect(finishPlaceById["last"]).toBe(3);
+  });
+});
