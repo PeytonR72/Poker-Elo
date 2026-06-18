@@ -314,6 +314,7 @@ export default class MatchRoom implements Party.Server {
   /** Called when the turn timer fires for the given seat. */
   private onTurnExpired(seatIdx: number): void {
     if (!this.tableState || this.tableState.street === "complete") return;
+    if (this.tableState.toAct !== seatIdx) return;
 
     // Check if the player has timebank remaining and hasn't used it this turn
     const connState = [...this.players.values()].find((p) => p.seatIndex === seatIdx);

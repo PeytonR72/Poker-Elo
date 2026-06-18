@@ -1030,4 +1030,30 @@ describe("MatchRoom turn timer (Task 7)", () => {
       expect(errorMsgs).toHaveLength(0);
     }
   });
+
+  it("expired timer for wrong seat is a no-op", async () => {
+    vi.useFakeTimers();
+    const { room, conns, broadcastMsgs } = await setupTimerMatch();
+    let ts = room.currentTableState!;
+    const originalIdx = ts.toAct!;
+
+    // Fire sendYourTurn to establish a timer for seat 0
+    const originalBroadcastCount = broadcastMsgs.length;
+
+    // Manually set toAct to a different seat (simulating state advance)
+    ts = room.currentTableState!;
+    const newIdx = (originalIdx + 1) % TABLE_SIZE;
+    (ts as { toAct: number }).toAct = newIdx;
+
+    // Advance past the original turn time — the stale timer callback for originalIdx should be a no-op
+    const broadcastCountBeforeExpiry = broadcastMsgs.length;
+    await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+    // No new broadcast events should have occurred (handler returned early)
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBeforeExpiry);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts).toHaveLength(0);
+  });
 });
