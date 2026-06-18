@@ -34,7 +34,10 @@ export function settleShowdown(state: TableState): { state: TableState; events: 
   for (let i = 0; i < s.seats.length; i++) {
     const seat = s.seats[i];
     if (seat && (seat.status === "active" || seat.status === "allin")) {
-      const v = evaluate7([seat.holeCards![0], seat.holeCards![1], ...s.board]);
+      if (seat.holeCards == null) {
+        throw new Error(`Seat ${seat.id} is in hand but has no hole cards`);
+      }
+      const v = evaluate7([seat.holeCards[0], seat.holeCards[1], ...s.board]);
       score.set(i, v);
       reveals.push({ seat: i, value: v });
     }

@@ -52,7 +52,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 | `engine/showdown.ts` | `settleShowdown`, `awardSingleWinner` |
 | `engine/reducer.ts` | `applyAction` |
 | `engine/selectors.ts` | `redactFor`, `PublicSeat`, `PublicView` |
-| `elo/pairwise.ts` | `pairwiseElo`, `EloPlayer`, `rankForRating` |
+| `elo/pairwise.ts` | `pairwiseElo`, `EloPlayer`, `rankForRating` — **Note:** `pairwiseElo` deltas are NOT zero-sum when K differs between players (provisional vs normal). The persistence layer must apply each player's delta independently, not assume a balanced ledger. |
 | `bots/policy.ts` | `decide` |
 
 All of the above are re-exported from `shared/src/index.ts` (the public barrel).

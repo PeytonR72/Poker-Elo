@@ -31,6 +31,10 @@ export function pairwiseElo(
     }
   }
 
+  // Rounding is applied per-player independently. When K differs between players
+  // (e.g. provisional K=48 vs normal K=24), the sum of deltas is NOT guaranteed to be
+  // zero — this is intentional. The persistence layer must apply each player's delta
+  // independently and must not assume a balanced ledger.
   const out: Record<string, number> = {};
   for (const id of Object.keys(raw)) out[id] = Math.round(raw[id]!);
   return out;

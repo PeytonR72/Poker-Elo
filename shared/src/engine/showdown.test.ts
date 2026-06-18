@@ -35,7 +35,7 @@ function mkState(seats: (Seat | null)[], board: string): TableState {
     handNumber: 1,
     pots: [],
     elapsedMs: 0,
-    format: "cash",
+    format: "turbo",
   };
 }
 
