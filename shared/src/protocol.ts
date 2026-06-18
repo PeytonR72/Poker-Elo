@@ -5,10 +5,11 @@ export type ClientMsg =
   | { t: "hello"; jwt: string }
   | { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number }
   | { t: "sitOut" }
-  | { t: "ping"; ts: number };
+  | { t: "ping"; ts: number }
+  | { t: "startMatch" };
 
 export type ServerMsg =
-  | { t: "seated"; seat: number }
+  | { t: "seated"; seatIndex: number; playerId: string }
   | { t: "dealPrivate"; seat: number; holeCards: [number, number] }
   | { t: "snapshot"; view: unknown }
   | { t: "event"; event: unknown }

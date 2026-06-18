@@ -2,5 +2,10 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true
-  }
+  },
+  "references": [
+    { "path": "./shared" },
+    { "path": "./party" }
+  ],
+  "files": []
 }
