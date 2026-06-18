@@ -17,6 +17,7 @@ export type ServerMsg =
   | { t: "snapshot"; view: unknown }
   | { t: "event"; event: GameEvent }
   | { t: "yourTurn"; mask: ActionMask; deadlineTs: number }
+  | { t: "timebankUsed"; seatIdx: number; remainingMs: number }
   | { t: "matchOver"; placements: unknown; eloDeltas?: unknown }
   | { t: "error"; message: string };
 

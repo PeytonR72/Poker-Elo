@@ -13,14 +13,18 @@ import {
   blindLevelAt,
   legalActions,
   applyAction,
+  TIMEBANK_INITIAL_MS,
+  TIMEBANK_REPLENISH_MS,
 } from "@poker/shared";
 import type { TableState, PublicView, Action, ActionMask } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
+import { TurnTimer } from "./timers.js";
 
 type ConnState = {
   playerId: string; // Supabase user sub (from JWT)
   seatIndex: number | null; // null until seated
   authed: boolean;
+  timebankMs: number; // milliseconds remaining in timebank
 };
 
 /** Validate an action against the legal-actions mask. */
@@ -61,10 +65,13 @@ export default class MatchRoom implements Party.Server {
   private bustOrder: string[] = []; // playerId in bust order (first busted = last place)
   private handNumber: number = 0;
 
+  private turnTimer = new TurnTimer();
+  private timebankUsedThisTurn = false;
+
   constructor(readonly party: Party.Party) {}
 
   onConnect(conn: Party.Connection): void {
-    this.players.set(conn.id, { playerId: "", seatIndex: null, authed: false });
+    this.players.set(conn.id, { playerId: "", seatIndex: null, authed: false, timebankMs: 0 });
   }
 
   onClose(conn: Party.Connection): void {
@@ -130,6 +137,9 @@ export default class MatchRoom implements Party.Server {
         sender.send(encode({ t: "error", message: "illegal_action" }));
         return;
       }
+
+      // Cancel the turn timer before applying the action
+      this.turnTimer.cancel();
 
       // Apply action
       const { state, events } = applyAction(this.tableState, action);
@@ -206,6 +216,7 @@ export default class MatchRoom implements Party.Server {
     state.playerId = playerId;
     state.seatIndex = seatIndex;
     state.authed = true;
+    state.timebankMs = TIMEBANK_INITIAL_MS;
 
     sender.send(encode({ t: "seated", seatIndex, playerId }));
 
@@ -275,7 +286,7 @@ export default class MatchRoom implements Party.Server {
     }
   }
 
-  /** Send a yourTurn message to the currently active seat. */
+  /** Send a yourTurn message to the currently active seat and start the turn timer. */
   private sendYourTurn(): void {
     if (!this.tableState || this.tableState.street === "complete") return;
     const seatIdx = this.tableState.toAct;
@@ -294,6 +305,52 @@ export default class MatchRoom implements Party.Server {
       }
     }
     // Bot seats handled in Task 12
+
+    // Start the turn timer
+    this.timebankUsedThisTurn = false;
+    this.turnTimer.start(format.turnTimeMs, () => this.onTurnExpired(seatIdx));
+  }
+
+  /** Called when the turn timer fires for the given seat. */
+  private onTurnExpired(seatIdx: number): void {
+    if (!this.tableState || this.tableState.street === "complete") return;
+
+    // Check if the player has timebank remaining and hasn't used it this turn
+    const connState = [...this.players.values()].find((p) => p.seatIndex === seatIdx);
+    if (connState && !this.timebankUsedThisTurn && TIMEBANK_REPLENISH_MS > 0 && connState.timebankMs > 0) {
+      const ext = Math.min(connState.timebankMs, TIMEBANK_REPLENISH_MS);
+      connState.timebankMs -= ext;
+      this.timebankUsedThisTurn = true;
+      // Notify the player that their timebank is being used
+      for (const c of this.party.getConnections()) {
+        if (this.players.get(c.id)?.seatIndex === seatIdx) {
+          c.send(encode({ t: "timebankUsed", seatIdx, remainingMs: connState.timebankMs }));
+          break;
+        }
+      }
+      this.turnTimer.start(ext, () => this.onTurnExpired(seatIdx));
+      return;
+    }
+
+    // Auto-act: check if legal, else fold
+    const mask = legalActions(this.tableState, seatIdx);
+    const action: Action = mask.canCheck
+      ? { seat: seatIdx, type: "check", amount: 0 }
+      : { seat: seatIdx, type: "fold", amount: 0 };
+
+    const { state, events } = applyAction(this.tableState, action);
+    this.tableState = state;
+
+    for (const event of events) {
+      this.party.broadcast(encode({ t: "event", event }));
+    }
+    this.broadcastSnapshots();
+
+    if (this.tableState.street === "complete") {
+      this.onHandComplete();
+    } else {
+      this.sendYourTurn();
+    }
   }
 
   /** Called when a hand completes. Stub — implemented in Task 8. */

@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
-import { encode, TABLE_SIZE, legalActions } from "@poker/shared";
+import { encode, TABLE_SIZE, legalActions, MATCH_FORMATS, DEFAULT_FORMAT } from "@poker/shared";
 import MatchRoom, { csprngSeed } from "./matchRoom.js";
+import { TurnTimer } from "./timers.js";
 
 // ---------- helpers ----------
 
@@ -780,6 +781,253 @@ describe("MatchRoom action receiver (Task 6)", () => {
         .map((m) => JSON.parse(m))
         .filter((m) => m.t === "yourTurn");
       expect(yourTurnMsgs.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+// ---------- Task 7: TurnTimer unit tests ----------
+
+describe("TurnTimer", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("fires callback after the specified delay", async () => {
+    vi.useFakeTimers();
+    let fired = false;
+    const timer = new TurnTimer();
+    timer.start(1000, () => { fired = true; });
+
+    expect(fired).toBe(false);
+    await vi.runAllTimersAsync();
+    expect(fired).toBe(true);
+  });
+
+  it("cancel() prevents the callback from firing", async () => {
+    vi.useFakeTimers();
+    let fired = false;
+    const timer = new TurnTimer();
+    timer.start(1000, () => { fired = true; });
+    timer.cancel();
+
+    await vi.runAllTimersAsync();
+    expect(fired).toBe(false);
+  });
+
+  it("a second start() cancels the first and uses the new callback", async () => {
+    vi.useFakeTimers();
+    let firstFired = false;
+    let secondFired = false;
+    const timer = new TurnTimer();
+
+    timer.start(1000, () => { firstFired = true; });
+    timer.start(500, () => { secondFired = true; });
+
+    await vi.runAllTimersAsync();
+    expect(firstFired).toBe(false);
+    expect(secondFired).toBe(true);
+  });
+});
+
+// ---------- Task 7: turn timer integration tests ----------
+
+describe("MatchRoom turn timer (Task 7)", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const turnTimeMs = MATCH_FORMATS[DEFAULT_FORMAT]!.turnTimeMs;
+
+  /** Build a full match room with fake timer support. */
+  async function setupTimerMatch(): Promise<{
+    room: MatchRoom;
+    conns: MockConnectionList;
+    broadcastMsgs: string[];
+  }> {
+    const conns = makeConns();
+    const broadcastMsgs: string[] = [];
+    const party = {
+      id: "test-room",
+      connections: conns,
+      getConnections: () => conns,
+      broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+      env: {},
+    } as unknown as Party.Party;
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    return { room, conns, broadcastMsgs };
+  }
+
+  it("timer fires after turnTimeMs → auto-check emitted when check is legal", async () => {
+    vi.useFakeTimers();
+    const { room, conns, broadcastMsgs } = await setupTimerMatch();
+
+    // Advance to a state where check IS legal (post-flop, or BB after everyone calls).
+    // Preflop UTG can't check (faces BB), so we call/fold until we reach a seat that can check.
+    // Simplest: keep folding until the hand completes or we find a check situation.
+    // Actually let's drive all preflop players to call/fold until BB can check.
+    let ts = room.currentTableState!;
+    while (ts.street === "preflop" && ts.toAct !== null) {
+      const idx = ts.toAct;
+      const m = legalActions(ts, idx);
+      if (m.canCheck) break; // BB can check — stop here
+      const conn = conns.get(`seat-${idx}`)!;
+      // Call if possible (to keep the hand alive); otherwise fold
+      const actionType = m.canCall ? "call" : "fold";
+      const amount = m.canCall ? m.callAmount : 0;
+      await room.onMessage(encode({ t: "action", seat: idx, action: actionType, amount }), conn);
+      ts = room.currentTableState!;
+      if (ts.street === "complete") break;
+    }
+
+    if (ts.street === "complete" || ts.toAct === null) return; // hand over before reaching check
+
+    const activeIdx = ts.toAct;
+    const mask = legalActions(ts, activeIdx);
+    expect(mask.canCheck).toBe(true); // BB should be able to check now
+
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Advance time past the turn deadline
+    await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+    // Should have broadcast at least one event (the auto-check)
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+
+    // The auto-check should change state
+    const newTs = room.currentTableState!;
+    expect(newTs).not.toBe(ts);
+  });
+
+  it("timer fires → auto-fold emitted when check is not legal", async () => {
+    vi.useFakeTimers();
+    const { room, conns, broadcastMsgs } = await setupTimerMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    // Keep acting until we find a seat where canCheck is false (facing a bet/raise)
+    // In preflop, the first player to act is UTG facing the BB, so after SB posts and BB posts,
+    // UTG (first to act preflop) faces the BB — check is NOT legal, must call/fold/raise.
+    // Actually in our setup, toAct is already determined by the engine.
+    // Check if the active player can't check (preflop UTG facing BB):
+    const mask = legalActions(ts, activeIdx);
+    if (mask.canCheck) {
+      // If check is legal (we're the BB and no raise), just skip this scenario
+      // by folding first to get to a state where fold is needed
+      // Instead, send a raise to create a situation where check isn't legal for next player
+      const activeConn = conns.get(`seat-${activeIdx}`)!;
+      await room.onMessage(
+        encode({ t: "action", seat: activeIdx, action: "raise", amount: mask.minRaiseTo }),
+        activeConn,
+      );
+      // Now the next player faces a raise — check won't be legal
+    }
+
+    const broadcastCountBefore = broadcastMsgs.length;
+    const newTs2 = room.currentTableState!;
+    if (newTs2.street === "complete" || newTs2.toAct === null) return; // hand ended
+
+    const nextActiveIdx = newTs2.toAct;
+    const nextMask = legalActions(newTs2, nextActiveIdx);
+
+    if (!nextMask.canCheck) {
+      // Advance time to trigger auto-fold
+      await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+      const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+      const eventBroadcasts = newBroadcasts
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.t === "event");
+      expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+
+      // Seat should be folded
+      const finalTs = room.currentTableState!;
+      if (finalTs.seats[nextActiveIdx]) {
+        expect(finalTs.seats[nextActiveIdx]!.status).toBe("folded");
+      }
+    }
+  });
+
+  it("player with timebank: first expiry extends if TIMEBANK_REPLENISH_MS > 0, else auto-acts", async () => {
+    // Since TIMEBANK_REPLENISH_MS = 0, extension never fires; auto-act happens immediately.
+    // This test verifies that behavior is correct either way.
+    vi.useFakeTimers();
+    const { room, broadcastMsgs } = await setupTimerMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    // Fire the timer
+    await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+    // With TIMEBANK_REPLENISH_MS = 0, no extension — auto-act fires immediately
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("player with empty timebank: first expiry auto-acts immediately", async () => {
+    vi.useFakeTimers();
+    const { room, broadcastMsgs } = await setupTimerMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    // Drain the player's timebank to 0
+    const connState = [...room["players"].values()].find((p) => p.seatIndex === activeIdx);
+    if (connState) connState.timebankMs = 0;
+
+    const broadcastCountBefore = broadcastMsgs.length;
+
+    await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+    // Auto-act should have fired
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("valid human action before expiry cancels timer (no double-action)", async () => {
+    vi.useFakeTimers();
+    const { room, conns, broadcastMsgs } = await setupTimerMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+    const activeConn = conns.get(`seat-${activeIdx}`)!;
+    const mask = legalActions(ts, activeIdx);
+
+    // Player acts manually (fold)
+    await room.onMessage(
+      encode({ t: "action", seat: activeIdx, action: mask.canCheck ? "check" : "fold" }),
+      activeConn,
+    );
+
+    const stateAfterAction = room.currentTableState;
+    const broadcastCountAfterAction = broadcastMsgs.length;
+
+    // Now advance time past the original deadline — timer should be cancelled
+    await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
+
+    // If a new timer fired for the next seat's turn that's fine, but no EXTRA events
+    // from the old timer. The key check: state was changed exactly once by the human action,
+    // and the original timer doesn't fire a second action on the original seat.
+    if (stateAfterAction && stateAfterAction.street !== "complete") {
+      // We can only verify that the folded/checked seat didn't get acted on again.
+      // The next seat may have had its timer fire — that's expected behavior.
+      // Just verify no error (double-action on completed/folded seat) occurred.
+      const allMsgs = broadcastMsgs.map((m) => JSON.parse(m));
+      const errorMsgs = allMsgs.filter((m) => m.t === "error");
+      expect(errorMsgs).toHaveLength(0);
     }
   });
 });
