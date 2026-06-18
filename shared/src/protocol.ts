@@ -10,7 +10,7 @@ export type ClientMsg =
 
 export type ServerMsg =
   | { t: "seated"; seatIndex: number; playerId: string }
-  | { t: "dealPrivate"; seat: number; holeCards: [number, number] }
+  | { t: "dealPrivate"; holeCards: [number, number] }
   | { t: "snapshot"; view: unknown }
   | { t: "event"; event: unknown }
   | { t: "yourTurn"; mask: unknown; deadline: number }

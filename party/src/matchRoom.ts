@@ -177,6 +177,7 @@ export default class MatchRoom implements Party.Server {
     this.handNumber++;
 
     this.broadcastSnapshots();
+    this.sendDealPrivate();
   }
 
   /** Send a redacted snapshot to each authed connected player. */
@@ -187,6 +188,18 @@ export default class MatchRoom implements Party.Server {
       const view: PublicView = redactFor(connState.playerId, this.tableState);
       const found = [...this.party.getConnections()].find((c) => c.id === connId);
       found?.send(encode({ t: "snapshot", view }));
+    }
+  }
+
+  /** Send private hole cards to each human player. */
+  private sendDealPrivate(): void {
+    if (!this.tableState) return;
+    for (const [connId, connState] of this.players) {
+      if (!connState.authed || connState.seatIndex === null) continue;
+      const seat = this.tableState.seats[connState.seatIndex];
+      if (!seat?.holeCards) continue;
+      const conn = [...this.party.getConnections()].find((c) => c.id === connId);
+      conn?.send(encode({ t: "dealPrivate", holeCards: seat.holeCards }));
     }
   }
 

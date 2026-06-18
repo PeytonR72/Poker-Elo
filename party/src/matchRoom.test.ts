@@ -513,3 +513,108 @@ describe("MatchRoom broadcastSnapshots", () => {
     expect(snapshots.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ---------- Task 5: dealPrivate hole cards ----------
+
+describe("MatchRoom dealPrivate (Task 5)", () => {
+  it("each human connection receives exactly one dealPrivate message after startMatch", async () => {
+    const conns: MockPartyConns = makeConns();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    // All human connections should have received exactly one dealPrivate
+    for (const conn of conns.values()) {
+      const dealMsgs = conn._msgs
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.t === "dealPrivate");
+      expect(dealMsgs).toHaveLength(1);
+    }
+  });
+
+  it("dealPrivate hole cards match tableState.seats[seatIndex].holeCards for that player", async () => {
+    const conns: MockPartyConns = makeConns();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    const tableState = room.currentTableState!;
+
+    // For each player, verify their received dealPrivate matches their seat's hole cards
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = conns.get(`seat-${i}`)!;
+      const dealMsg = conn._msgs
+        .map((m) => JSON.parse(m))
+        .find((m) => m.t === "dealPrivate");
+
+      expect(dealMsg).toBeDefined();
+      const { holeCards: receivedCards } = dealMsg;
+      const { holeCards: actualCards } = tableState.seats[i]!;
+
+      // Both should be [Card, Card] arrays
+      expect(receivedCards).toEqual(actualCards);
+      expect(receivedCards).toHaveLength(2);
+      expect(actualCards).toHaveLength(2);
+    }
+  });
+
+  it("does not send dealPrivate for dev startMatch with unfilled table", async () => {
+    const conn = mockConn("p1");
+    const conns: MockPartyConns = makeConns();
+    conns.set(conn.id, conn);
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    // Should have snapshot AND dealPrivate
+    const msgs = conn._msgs.map((m) => JSON.parse(m));
+    const dealMsgs = msgs.filter((m) => m.t === "dealPrivate");
+    expect(dealMsgs).toHaveLength(1);
+  });
+
+  it("snapshot sent to player A does NOT contain player B's hole cards", async () => {
+    const conns: MockPartyConns = makeConns();
+    const party = mockParty({}, conns);
+    const room = new MatchRoom(party);
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      const conn = mockConn(`seat-${i}`);
+      conns.set(conn.id, conn);
+      room.onConnect(conn);
+      await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+    }
+
+    // Get player A's (seat 0) snapshot
+    const connA = conns.get("seat-0")!;
+    const snap = connA._msgs
+      .map((m) => JSON.parse(m))
+      .find((m) => m.t === "snapshot");
+
+    expect(snap).toBeDefined();
+    const view = snap.view;
+
+    // Player A (seat 0) should see their own hole cards
+    const ownSeat = view.seats[0];
+    expect(ownSeat.holeCards).not.toBeNull();
+    expect(ownSeat.holeCards).toHaveLength(2);
+
+    // Player A should NOT see opponent (seat 1)'s hole cards
+    const opponentSeat = view.seats[1];
+    expect(opponentSeat.holeCards).toBeNull();
+  });
+});
