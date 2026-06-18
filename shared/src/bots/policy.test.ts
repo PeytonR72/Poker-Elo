@@ -130,7 +130,7 @@ describe("bots play a full hand to completion", () => {
       deck: shuffledDeck(123),
       handNumber: 1,
       elapsedMs: 0,
-      format: "cash",
+      format: "turbo",
     });
     const before = 6000;
     const rng = mulberry32(123);
