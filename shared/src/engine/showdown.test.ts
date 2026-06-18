@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { settleShowdown, awardSingleWinner } from "./showdown.js";
 import { createSeat } from "./state.js";
 import { cardFromString as C } from "../cards.js";
-import type { GameEvent, Seat, TableState } from "./types.js";
+import type { Seat, TableState } from "./types.js";
 
 function mkSeat(
   id: string,
@@ -52,11 +52,14 @@ describe("settleShowdown", () => {
       ],
       "2c 7d 9s Jh 3c",
     );
-    const events: GameEvent[] = [];
-    settleShowdown(st, events);
-    expect(st.seats[0]!.stack).toBe(200); // aces win
-    expect(st.seats[1]!.stack).toBe(0);
-    expect(st.street).toBe("complete");
+    const { state: result, events } = settleShowdown(st);
+    expect(result.seats[0]!.stack).toBe(200); // aces win
+    expect(result.seats[1]!.stack).toBe(0);
+    expect(result.street).toBe("complete");
+    // original must not be mutated
+    expect(st.seats[0]!.stack).toBe(0);
+    expect(st.street).toBe("river");
+    expect(events.some((e) => e.type === "handComplete")).toBe(true);
   });
 
   it("splits a tied pot and gives the odd chip to the first seat left of the button", () => {
@@ -72,10 +75,9 @@ describe("settleShowdown", () => {
       ],
       "Ac Kc Qc Jc Tc",
     );
-    const events: GameEvent[] = [];
-    settleShowdown(st, events); // button is seat 0, first left is seat 1
-    expect(st.seats[1]!.stack).toBe(26); // odd chip
-    expect(st.seats[0]!.stack).toBe(25);
+    const { state: result } = settleShowdown(st); // button is seat 0, first left is seat 1
+    expect(result.seats[1]!.stack).toBe(26); // odd chip
+    expect(result.seats[0]!.stack).toBe(25);
   });
 
   it("respects side-pot eligibility (short all-in cannot win the side pot)", () => {
@@ -91,12 +93,11 @@ describe("settleShowdown", () => {
       ],
       "Ac 2d 7s Jh 3c", // a makes trip aces; b kings; c queens
     );
-    const events: GameEvent[] = [];
-    settleShowdown(st, events);
+    const { state: result } = settleShowdown(st);
     // main pot 120 -> a (trips). side pot 120 -> b (kings beat queens).
-    expect(st.seats[0]!.stack).toBe(120);
-    expect(st.seats[1]!.stack).toBe(120);
-    expect(st.seats[2]!.stack).toBe(0);
+    expect(result.seats[0]!.stack).toBe(120);
+    expect(result.seats[1]!.stack).toBe(120);
+    expect(result.seats[2]!.stack).toBe(0);
   });
 });
 
@@ -113,9 +114,13 @@ describe("awardSingleWinner", () => {
       ],
       "",
     );
-    const events: GameEvent[] = [];
-    awardSingleWinner(st, events);
-    expect(st.seats[0]!.stack).toBe(50);
-    expect(st.street).toBe("complete");
+    const originalStack = st.seats[0]!.stack;
+    const { state: result, events } = awardSingleWinner(st);
+    expect(result.seats[0]!.stack).toBe(50);
+    expect(result.street).toBe("complete");
+    // original must not be mutated
+    expect(st.seats[0]!.stack).toBe(originalStack);
+    expect(st.street).toBe("river");
+    expect(events.some((e) => e.type === "handComplete")).toBe(true);
   });
 });
