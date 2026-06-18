@@ -70,6 +70,11 @@ export default class MatchRoom implements Party.Server {
 
     // Dev-only: allow a "startMatch" trigger without filling the table
     if (msg.t === "startMatch" && isDev) {
+      const connState = this.players.get(sender.id);
+      if (!connState?.authed) {
+        sender.send(encode({ t: "error", message: "not_authed" }));
+        return;
+      }
       this.startMatch();
       return;
     }
@@ -142,6 +147,7 @@ export default class MatchRoom implements Party.Server {
 
   /** Start the match: build seats, deal first hand, broadcast snapshots. */
   private startMatch(): void {
+    if (this.tableState !== null) return;
     const format = MATCH_FORMATS[DEFAULT_FORMAT]!;
     const elapsedMs = 0; // first hand
     const { sb, bb } = blindLevelAt(elapsedMs, format);
@@ -168,6 +174,7 @@ export default class MatchRoom implements Party.Server {
       elapsedMs,
       format: DEFAULT_FORMAT,
     });
+    this.handNumber++;
 
     this.broadcastSnapshots();
   }
@@ -178,8 +185,8 @@ export default class MatchRoom implements Party.Server {
     for (const [connId, connState] of this.players) {
       if (!connState.authed) continue;
       const view: PublicView = redactFor(connState.playerId, this.tableState);
-      const conn = this.party.connections.get(connId);
-      conn?.send(encode({ t: "snapshot", view }));
+      const found = [...this.party.getConnections()].find((c) => c.id === connId);
+      found?.send(encode({ t: "snapshot", view }));
     }
   }
 

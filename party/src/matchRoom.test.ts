@@ -27,18 +27,45 @@ function mockConn(id: string): Party.Connection & { _msgs: string[]; _closed: bo
 }
 
 type MockConn = Party.Connection & { _msgs: string[]; _closed: boolean };
-type MockPartyConns = Map<string, MockConn>;
+/** A Map-backed connection store that iterates over values (not [key,value] pairs).
+ *  This matches the PartyKit ConnectionList iterable contract. */
+class MockConnectionList implements Iterable<MockConn> {
+  private _map = new Map<string, MockConn>();
+
+  set(id: string, conn: MockConn): void {
+    this._map.set(id, conn);
+  }
+
+  get(id: string): MockConn | undefined {
+    return this._map.get(id);
+  }
+
+  values(): IterableIterator<MockConn> {
+    return this._map.values();
+  }
+
+  [Symbol.iterator](): Iterator<MockConn> {
+    return this._map.values();
+  }
+}
+
+type MockPartyConns = MockConnectionList;
 
 function mockParty(
   env: Record<string, string> = {},
-  conns: MockPartyConns = new Map(),
+  conns: MockPartyConns = new MockConnectionList(),
 ): Party.Party {
   return {
     id: "test-room",
     connections: conns,
+    getConnections: () => conns,
     broadcast: () => {},
     env,
   } as unknown as Party.Party;
+}
+
+function makeConns(): MockConnectionList {
+  return new MockConnectionList();
 }
 
 async function makeJwt(sub: string, secret: string): Promise<string> {
@@ -273,6 +300,43 @@ describe("MatchRoom hello edge cases", () => {
   });
 });
 
+// ---------- Task 4: startMatch guards ----------
+
+describe("MatchRoom startMatch guards", () => {
+  it("unauthenticated connection gets not_authed error and tableState stays null", async () => {
+    const room = new MatchRoom(mockParty({}));
+    const conn = mockConn("unauthed-1");
+    room.onConnect(conn);
+
+    // Send startMatch without authenticating first
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+
+    expect(room.currentTableState).toBeNull();
+    const msgs = conn._msgs.map((m) => JSON.parse(m));
+    expect(msgs.some((m) => m.t === "error" && m.message === "not_authed")).toBe(true);
+    expect(conn._closed).toBe(false); // not closed, just rejected
+  });
+
+  it("calling startMatch twice leaves state unchanged after first call", async () => {
+    const conn = mockConn("p1");
+    const conns: MockPartyConns = makeConns();
+    conns.set(conn.id, conn);
+    const room = new MatchRoom(mockParty({}, conns));
+
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+
+    // First startMatch
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+    const stateAfterFirst = room.currentTableState;
+    expect(stateAfterFirst).not.toBeNull();
+
+    // Second startMatch — should be a no-op
+    await room.onMessage(encode({ t: "startMatch" }), conn);
+    expect(room.currentTableState).toBe(stateAfterFirst); // same reference
+  });
+});
+
 // ---------- Task 4: CSPRNG seed ----------
 
 describe("csprngSeed", () => {
@@ -360,7 +424,7 @@ describe("MatchRoom startMatch (dev mode)", () => {
 
 describe("MatchRoom auto-start on full table", () => {
   it("starts match automatically when TABLE_SIZE players connect and auth", async () => {
-    const conns: MockPartyConns = new Map();
+    const conns: MockPartyConns = makeConns();
     const party = mockParty({}, conns);
     const room = new MatchRoom(party);
 
@@ -380,7 +444,7 @@ describe("MatchRoom auto-start on full table", () => {
 
 describe("MatchRoom broadcastSnapshots", () => {
   it("each authed connection receives a snapshot message after match starts", async () => {
-    const conns: MockPartyConns = new Map();
+    const conns: MockPartyConns = makeConns();
     const party = mockParty({}, conns);
     const room = new MatchRoom(party);
 
@@ -399,7 +463,7 @@ describe("MatchRoom broadcastSnapshots", () => {
   });
 
   it("snapshot view does not contain deck or opponent holeCards", async () => {
-    const conns: MockPartyConns = new Map();
+    const conns: MockPartyConns = makeConns();
     const party = mockParty({}, conns);
     const room = new MatchRoom(party);
 
@@ -436,7 +500,8 @@ describe("MatchRoom broadcastSnapshots", () => {
 
   it("dev startMatch also broadcasts snapshot to authed player", async () => {
     const conn = mockConn("p1");
-    const conns: MockPartyConns = new Map([[conn.id, conn]]);
+    const conns: MockPartyConns = makeConns();
+    conns.set(conn.id, conn);
     const party = mockParty({}, conns);
     const room = new MatchRoom(party);
 
