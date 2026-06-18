@@ -11,8 +11,10 @@ import {
   DEFAULT_FORMAT,
   MATCH_FORMATS,
   blindLevelAt,
+  legalActions,
+  applyAction,
 } from "@poker/shared";
-import type { TableState, PublicView } from "@poker/shared";
+import type { TableState, PublicView, Action, ActionMask } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 
 type ConnState = {
@@ -20,6 +22,26 @@ type ConnState = {
   seatIndex: number | null; // null until seated
   authed: boolean;
 };
+
+/** Validate an action against the legal-actions mask. */
+function isLegal(action: Action, mask: ActionMask): boolean {
+  switch (action.type) {
+    case "fold":
+      return mask.canFold;
+    case "check":
+      return mask.canCheck;
+    case "call":
+      return mask.canCall && action.amount === mask.callAmount;
+    case "raise":
+      return (
+        mask.canRaise &&
+        (action.amount ?? 0) >= mask.minRaiseTo &&
+        (action.amount ?? 0) <= mask.maxRaiseTo
+      );
+    default:
+      return false;
+  }
+}
 
 /** XOR-fold 128 bits of CSPRNG entropy into a 32-bit seed for mulberry32. */
 function csprngSeed(): number {
@@ -76,6 +98,55 @@ export default class MatchRoom implements Party.Server {
         return;
       }
       this.startMatch();
+      return;
+    }
+
+    // Handle action messages from authed players
+    if (msg.t === "action") {
+      const connState = this.players.get(sender.id);
+      if (!connState?.authed || connState.seatIndex === null) {
+        sender.send(encode({ t: "error", message: "not_authed" }));
+        return;
+      }
+      if (!this.tableState || this.tableState.street === "complete") return;
+
+      // Must be the active seat
+      if (this.tableState.toAct !== connState.seatIndex) {
+        sender.send(encode({ t: "error", message: "not_your_turn" }));
+        return;
+      }
+
+      // Build typed action from ClientMsg
+      const actionMsg = msg as { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number };
+      const action: Action = {
+        seat: connState.seatIndex,
+        type: actionMsg.action,
+        amount: actionMsg.amount ?? 0,
+      };
+
+      // Validate legality
+      const mask = legalActions(this.tableState, connState.seatIndex);
+      if (!isLegal(action, mask)) {
+        sender.send(encode({ t: "error", message: "illegal_action" }));
+        return;
+      }
+
+      // Apply action
+      const { state, events } = applyAction(this.tableState, action);
+      this.tableState = state;
+
+      // Broadcast events then snapshots
+      for (const event of events) {
+        this.party.broadcast(encode({ t: "event", event }));
+      }
+      this.broadcastSnapshots();
+
+      // Continue or end hand
+      if (this.tableState.street === "complete") {
+        this.onHandComplete();
+      } else {
+        this.sendYourTurn();
+      }
       return;
     }
 
@@ -178,6 +249,7 @@ export default class MatchRoom implements Party.Server {
 
     this.broadcastSnapshots();
     this.sendDealPrivate();
+    this.sendYourTurn();
   }
 
   /** Send a redacted snapshot to each authed connected player. */
@@ -201,6 +273,32 @@ export default class MatchRoom implements Party.Server {
       const conn = [...this.party.getConnections()].find((c) => c.id === connId);
       conn?.send(encode({ t: "dealPrivate", holeCards: seat.holeCards }));
     }
+  }
+
+  /** Send a yourTurn message to the currently active seat. */
+  private sendYourTurn(): void {
+    if (!this.tableState || this.tableState.street === "complete") return;
+    const seatIdx = this.tableState.toAct;
+    if (seatIdx === null) return;
+
+    const format = MATCH_FORMATS[this.tableState.format];
+    if (!format) return;
+    const deadlineTs = Date.now() + format.turnTimeMs;
+    const mask = legalActions(this.tableState, seatIdx);
+
+    // Find the connection for this seat and send yourTurn
+    for (const c of this.party.getConnections()) {
+      if (this.players.get(c.id)?.seatIndex === seatIdx) {
+        c.send(encode({ t: "yourTurn", mask, deadlineTs }));
+        break;
+      }
+    }
+    // Bot seats handled in Task 12
+  }
+
+  /** Called when a hand completes. Stub — implemented in Task 8. */
+  private onHandComplete(): void {
+    // stub — implemented in Task 8
   }
 
   /** Exposed for tests — number of currently tracked connections. */

@@ -1,6 +1,9 @@
 // Discriminated-union wire protocol. decode() validates the TAG ONLY; the server
 // re-guards every payload (security-critical) in a later unit.
 
+import type { ActionMask } from "./engine/legalActions.js";
+import type { GameEvent } from "./engine/types.js";
+
 export type ClientMsg =
   | { t: "hello"; jwt: string }
   | { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number }
@@ -12,8 +15,8 @@ export type ServerMsg =
   | { t: "seated"; seatIndex: number; playerId: string }
   | { t: "dealPrivate"; holeCards: [number, number] }
   | { t: "snapshot"; view: unknown }
-  | { t: "event"; event: unknown }
-  | { t: "yourTurn"; mask: unknown; deadline: number }
+  | { t: "event"; event: GameEvent }
+  | { t: "yourTurn"; mask: ActionMask; deadlineTs: number }
   | { t: "matchOver"; placements: unknown; eloDeltas?: unknown }
   | { t: "error"; message: string };
 

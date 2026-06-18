@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type * as Party from "partykit/server";
 import { SignJWT } from "jose";
-import { encode, TABLE_SIZE } from "@poker/shared";
+import { encode, TABLE_SIZE, legalActions } from "@poker/shared";
 import MatchRoom, { csprngSeed } from "./matchRoom.js";
 
 // ---------- helpers ----------
@@ -616,5 +616,170 @@ describe("MatchRoom dealPrivate (Task 5)", () => {
     // Player A should NOT see opponent (seat 1)'s hole cards
     const opponentSeat = view.seats[1];
     expect(opponentSeat.holeCards).toBeNull();
+  });
+});
+
+// ---------- Task 6: yourTurn + action receiver ----------
+
+/** Set up a full TABLE_SIZE room with all seats filled and match started.
+ *  Returns { room, conns, broadcastMsgs } where broadcastMsgs collects party.broadcast calls. */
+async function setupFullMatch(): Promise<{
+  room: MatchRoom;
+  conns: MockConnectionList;
+  broadcastMsgs: string[];
+}> {
+  const conns = makeConns();
+  const broadcastMsgs: string[] = [];
+  const party = {
+    id: "test-room",
+    connections: conns,
+    getConnections: () => conns,
+    broadcast: (msg: string) => { broadcastMsgs.push(msg); },
+    env: {},
+  } as unknown as Party.Party;
+  const room = new MatchRoom(party);
+
+  for (let i = 0; i < TABLE_SIZE; i++) {
+    const conn = mockConn(`seat-${i}`);
+    conns.set(conn.id, conn);
+    room.onConnect(conn);
+    await room.onMessage(encode({ t: "hello", jwt: `dev:player-${i}` }), conn);
+  }
+
+  return { room, conns, broadcastMsgs };
+}
+
+describe("MatchRoom yourTurn dispatch (Task 6)", () => {
+  it("sends yourTurn to the active seat after match starts", async () => {
+    const { room, conns } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    const activeSeatConn = conns.get(`seat-${activeIdx}`)!;
+    const yourTurnMsgs = activeSeatConn._msgs
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "yourTurn");
+
+    expect(yourTurnMsgs).toHaveLength(1);
+    const msg = yourTurnMsgs[0];
+    expect(msg.mask).toBeDefined();
+    expect(typeof msg.deadlineTs).toBe("number");
+    expect(msg.deadlineTs).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it("does NOT send yourTurn to non-active seats after match starts", async () => {
+    const { room, conns } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    for (let i = 0; i < TABLE_SIZE; i++) {
+      if (i === activeIdx) continue;
+      const conn = conns.get(`seat-${i}`)!;
+      const yourTurnMsgs = conn._msgs
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.t === "yourTurn");
+      expect(yourTurnMsgs).toHaveLength(0);
+    }
+  });
+});
+
+describe("MatchRoom action receiver (Task 6)", () => {
+  it("rejects action from wrong seat with not_your_turn error", async () => {
+    const { room, conns } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+
+    // Find a seat that is NOT the active one
+    const wrongIdx = (activeIdx + 1) % TABLE_SIZE;
+    const wrongConn = conns.get(`seat-${wrongIdx}`)!;
+
+    await room.onMessage(
+      encode({ t: "action", seat: wrongIdx, action: "fold" }),
+      wrongConn,
+    );
+
+    const errorMsgs = wrongConn._msgs
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "error" && m.message === "not_your_turn");
+    expect(errorMsgs).toHaveLength(1);
+  });
+
+  it("rejects illegal action (raise below min) with illegal_action error", async () => {
+    const { room, conns } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+    const mask = legalActions(ts, activeIdx);
+
+    const activeConn = conns.get(`seat-${activeIdx}`)!;
+
+    // Send a raise below the minimum raise-to amount
+    const belowMin = mask.minRaiseTo - 1;
+    await room.onMessage(
+      encode({ t: "action", seat: activeIdx, action: "raise", amount: belowMin }),
+      activeConn,
+    );
+
+    const errorMsgs = activeConn._msgs
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "error" && m.message === "illegal_action");
+    expect(errorMsgs).toHaveLength(1);
+  });
+
+  it("valid fold from active seat updates state, broadcasts events and snapshots", async () => {
+    const { room, conns, broadcastMsgs } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+    const activeConn = conns.get(`seat-${activeIdx}`)!;
+
+    const broadcastCountBefore = broadcastMsgs.length;
+    const snapshotCountBefore = activeConn._msgs
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "snapshot").length;
+
+    await room.onMessage(
+      encode({ t: "action", seat: activeIdx, action: "fold" }),
+      activeConn,
+    );
+
+    // State must be updated
+    const newTs = room.currentTableState!;
+    const foldedSeat = newTs.seats[activeIdx];
+    expect(foldedSeat?.status).toBe("folded");
+
+    // At least one event broadcast (the fold action event)
+    const newBroadcasts = broadcastMsgs.slice(broadcastCountBefore);
+    const eventBroadcasts = newBroadcasts
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "event");
+    expect(eventBroadcasts.length).toBeGreaterThanOrEqual(1);
+
+    // Snapshots sent after fold
+    const newSnapshots = activeConn._msgs
+      .map((m) => JSON.parse(m))
+      .filter((m) => m.t === "snapshot");
+    expect(newSnapshots.length).toBeGreaterThan(snapshotCountBefore);
+  });
+
+  it("after valid fold, yourTurn is sent to next active seat", async () => {
+    const { room, conns } = await setupFullMatch();
+    const ts = room.currentTableState!;
+    const activeIdx = ts.toAct!;
+    const activeConn = conns.get(`seat-${activeIdx}`)!;
+
+    await room.onMessage(
+      encode({ t: "action", seat: activeIdx, action: "fold" }),
+      activeConn,
+    );
+
+    // The next seat to act should have received a yourTurn
+    const newTs = room.currentTableState!;
+    if (newTs.street !== "complete" && newTs.toAct !== null) {
+      const nextIdx = newTs.toAct;
+      const nextConn = conns.get(`seat-${nextIdx}`)!;
+      const yourTurnMsgs = nextConn._msgs
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.t === "yourTurn");
+      expect(yourTurnMsgs.length).toBeGreaterThanOrEqual(1);
+    }
   });
 });
