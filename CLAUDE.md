@@ -30,7 +30,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 
 - `shared/` `@poker/shared` — pure engine (Build Unit 1 complete).
 - `client/` — React/Vite (placeholder).
-- `party/` — PartyKit rooms (placeholder).
+- `party/` — PartyKit rooms (Build Unit 2 complete).
 - `supabase/` — migrations + edge function (empty).
 
 ## `shared/src` module map
@@ -56,6 +56,21 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 | `bots/policy.ts` | `decide` |
 
 All of the above are re-exported from `shared/src/index.ts` (the public barrel).
+
+## `party/src` module map
+
+| File | Exports / Role |
+|---|---|
+| `matchRoom.ts` | `MatchRoom` — PartyKit `Party.Server`; full game loop, timers, ELO |
+| `auth.ts` | `verifyJwt(token, secret)`, `parseDevToken("dev:<id>")` |
+| `timers.ts` | `TurnTimer` — `start(ms, cb)` (auto-cancels previous), `cancel()` |
+| `botRunner.ts` | `decideBotAction(view, holeCards, mask, rng)`, `botThinkDelayMs(rng, min, max)` |
+
+**Key conventions for `party/`:**
+- `party.getConnections()` is an **iterable**, not a Map — iterate it; no `.get()`.
+- `timebankUsed` is broadcast BEFORE `yourTurn` so the client can update the clock first.
+- `pairwiseElo` deltas are applied independently per player (not assumed zero-sum).
+- CSPRNG seed: `crypto.getRandomValues(new Uint32Array(4))` XOR-folded to 32-bit.
 
 ## Commands
 
@@ -89,9 +104,10 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 ## Status
 
 **Build Unit 1 (scaffold + pure engine) is complete.**
-Next unit: PartyKit `MatchRoom` server — server-authoritative deal → private hole cards → action
-loop → redacted snapshots, then timers/timebank, match clock/blinds/bust placement/end, and bot
-runner.
+**Build Unit 2 (PartyKit `MatchRoom` server) is complete** — server-authoritative deal, private
+hole cards, action loop, turn timer/timebank, match clock/blinds/bust placement/end, ELO deltas,
+disconnect grace, and bot runner are all implemented and tested.
+Next unit: client UI (React/Vite) — connect to MatchRoom via PartyKit, render redacted views.
 
 ## Working practice
 

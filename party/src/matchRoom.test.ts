@@ -10,7 +10,6 @@ import { TurnTimer } from "./timers.js";
 
 function mockConn(id: string): Party.Connection & { _msgs: string[]; _closed: boolean } {
   const msgs: string[] = [];
-  let closed = false;
   return {
     id,
     _msgs: msgs,
@@ -19,7 +18,6 @@ function mockConn(id: string): Party.Connection & { _msgs: string[]; _closed: bo
       msgs.push(msg);
     },
     close() {
-      closed = true;
       (this as { _closed: boolean })._closed = true;
     },
     socket: {} as unknown,
@@ -962,7 +960,7 @@ describe("MatchRoom turn timer (Task 7)", () => {
     vi.useFakeTimers();
     const { room, broadcastMsgs } = await setupTimerMatch();
     const ts = room.currentTableState!;
-    const activeIdx = ts.toAct!;
+    void ts.toAct; // toAct noted but not used directly
 
     const broadcastCountBefore = broadcastMsgs.length;
 
@@ -1014,7 +1012,7 @@ describe("MatchRoom turn timer (Task 7)", () => {
     );
 
     const stateAfterAction = room.currentTableState;
-    const broadcastCountAfterAction = broadcastMsgs.length;
+    void stateAfterAction; // captured but not directly inspected (timer cancellation is the focus)
 
     // Now advance time past the original deadline — timer should be cancelled
     await vi.advanceTimersByTimeAsync(turnTimeMs + 1);
@@ -1034,12 +1032,12 @@ describe("MatchRoom turn timer (Task 7)", () => {
 
   it("expired timer for wrong seat is a no-op", async () => {
     vi.useFakeTimers();
-    const { room, conns, broadcastMsgs } = await setupTimerMatch();
+    const { room, broadcastMsgs } = await setupTimerMatch();
     let ts = room.currentTableState!;
     const originalIdx = ts.toAct!;
 
     // Fire sendYourTurn to establish a timer for seat 0
-    const originalBroadcastCount = broadcastMsgs.length;
+    void broadcastMsgs; // referenced for clarity; unused count intentional here
 
     // Manually set toAct to a different seat (simulating state advance)
     ts = room.currentTableState!;
@@ -1731,7 +1729,7 @@ describe("Task 11: disconnect/reconnect grace", () => {
 
   it("11.4: reconnect restores original seatIndex from tableState", async () => {
     vi.useFakeTimers();
-    const { room, conn, conns, playerId } = await setupSinglePlayerRoom();
+    const { room, conn, conns } = await setupSinglePlayerRoom();
 
     // Start match
     await room.onMessage(encode({ t: "startMatch" }), conn);
@@ -1781,9 +1779,6 @@ describe("Task 11: disconnect/reconnect grace", () => {
     const inactiveIdx = (activeIdx + 1) % TABLE_SIZE;
     const inactivePlayerId = `player-${inactiveIdx}`;
     const inactiveConn = conns.get(`seat-${inactiveIdx}`)!;
-
-    // Count events before disconnecting the inactive player
-    const broadcastCountBefore = broadcastMsgs.length;
 
     // Disconnect the inactive player
     room.onClose(inactiveConn);
@@ -2107,6 +2102,7 @@ describe("Task 13: integration smoke test", () => {
       env: {} as Record<string, unknown>,
     } as unknown as Party.Party;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const room = new MatchRoom(party) as any;
 
     // Connect and auth human
