@@ -2239,8 +2239,8 @@ describe("endMatch report-match wiring (Task 14)", () => {
     };
     expect(body.roomId).toBe("test-room");
     expect(body.format).toBe("turbo");
-    expect(body.finishPlaceById["human-1"]).toBeDefined();
-    expect(body.eloDeltas["human-1"]).toBeDefined();
+    expect(body.finishPlaceById["human-1"]).toBe(1);
+    expect(body.eloDeltas["human-1"]).toBeTypeOf("number");
     const authHeader = (fetchCalls[0]!.init.headers as Record<string, string>)["Authorization"];
     expect(authHeader).toBe("Bearer service-key-xyz");
   });
@@ -2290,5 +2290,8 @@ describe("endMatch report-match wiring (Task 14)", () => {
     // Bot keys must not be in the payload
     expect(Object.keys(body.finishPlaceById)).not.toContain("bot-0");
     expect(Object.keys(body.eloDeltas)).not.toContain("bot-0");
+    // Human keys must be present (not accidentally filtered)
+    expect(Object.keys(body.finishPlaceById)).toContain("human-1");
+    expect(Object.keys(body.eloDeltas)).toContain("human-1");
   });
 });

@@ -1,3 +1,7 @@
+-- IMPORTANT: The rank tier thresholds (500/750/1000/1300/1750) and default rating (400)
+-- below mirror RANK_TIERS and ELO_DEFAULT_RATING in shared/src/constants.ts.
+-- If those constants change, update this migration accordingly.
+
 -- profiles: one row per registered user, written only by service role
 CREATE TABLE IF NOT EXISTS profiles (
   id            uuid PRIMARY KEY REFERENCES auth.users ON DELETE CASCADE,
@@ -61,6 +65,7 @@ CREATE OR REPLACE FUNCTION increment_rating(p_player_id uuid, p_delta int)
 RETURNS int
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_new_rating int;

@@ -669,6 +669,8 @@ export default class MatchRoom implements Party.Server {
           finishPlaceById: humanFinishPlaces,
           eloDeltas: humanEloDeltas,
         }),
+      }).catch((err: unknown) => {
+        console.error("[report-match] fetch failed:", err);
       });
     }
   }
