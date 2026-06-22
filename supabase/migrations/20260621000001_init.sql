@@ -55,3 +55,21 @@ ALTER TABLE match_results ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "match_results_read_all"
   ON match_results FOR SELECT
   USING (true);
+
+-- Atomically increment a player's rating and games_played, return new rating
+CREATE OR REPLACE FUNCTION increment_rating(p_player_id uuid, p_delta int)
+RETURNS int
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_new_rating int;
+BEGIN
+  UPDATE profiles
+  SET rating = rating + p_delta,
+      games_played = games_played + 1
+  WHERE id = p_player_id
+  RETURNING rating INTO v_new_rating;
+  RETURN v_new_rating;
+END;
+$$;
