@@ -11,6 +11,13 @@ interface ReportMatchPayload {
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
+  if (!SERVICE_ROLE_KEY) {
+    return new Response(JSON.stringify({ error: "server_misconfigured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   if (req.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
@@ -59,15 +66,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const matchId: string = (matchRow as { id: string }).id;
   const playerIds = Object.keys(finishPlaceById).filter(id => !id.startsWith("bot-"));
+  const failedPlayerIds: string[] = [];
 
   for (const playerId of playerIds) {
     const delta = eloDeltas[playerId] ?? 0;
     const place = finishPlaceById[playerId] ?? 0;
 
     // Ensure profile row exists
-    await supabase
+    const { error: upsertErr } = await supabase
       .from("profiles")
       .upsert({ id: playerId }, { onConflict: "id", ignoreDuplicates: true });
+    if (upsertErr) {
+      console.error(`profile upsert error for ${playerId}:`, upsertErr);
+    }
 
     // Atomically update rating + games_played, get new rating
     const { data: newRating, error: rpcErr } = await supabase
@@ -75,6 +86,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (rpcErr) {
       console.error(`increment_rating error for ${playerId}:`, rpcErr);
+      failedPlayerIds.push(playerId);
       continue;
     }
 
@@ -95,6 +107,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
+  if (failedPlayerIds.length > 0) {
+    return new Response(JSON.stringify({ ok: false, matchId, failedPlayerIds }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   return new Response(JSON.stringify({ ok: true, matchId }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
