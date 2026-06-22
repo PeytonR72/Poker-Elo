@@ -78,6 +78,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .upsert({ id: playerId }, { onConflict: "id", ignoreDuplicates: true });
     if (upsertErr) {
       console.error(`profile upsert error for ${playerId}:`, upsertErr);
+      failedPlayerIds.push(playerId);
+      continue;
     }
 
     // Atomically update rating + games_played, get new rating
@@ -104,6 +106,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (resultErr) {
       console.error(`match_results insert error for ${playerId}:`, resultErr);
+      failedPlayerIds.push(playerId);
     }
   }
 
