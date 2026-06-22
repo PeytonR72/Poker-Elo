@@ -3,6 +3,8 @@
   "main": "party/src/matchRoom.ts",
   "compatibilityDate": "2024-11-01",
   "vars": {
-    "SUPABASE_JWT_SECRET": ""
+    "SUPABASE_JWT_SECRET": "",
+    "SUPABASE_URL": "",
+    "SUPABASE_SERVICE_ROLE_KEY": ""
   }
 }

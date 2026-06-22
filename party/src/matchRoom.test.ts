@@ -1455,6 +1455,7 @@ describe("MatchRoom onHandComplete (Task 8)", () => {
 function makeEndMatchRoom(
   survivors: Array<{ id: string; stack: number }>,
   bustedIds: string[], // bust order (first = first to bust = worst place among busted)
+  env: Record<string, string> = {},
 ): { room: MatchRoom; broadcastMsgs: string[] } {
   const broadcastMsgs: string[] = [];
   const conns = makeConns();
@@ -1463,7 +1464,7 @@ function makeEndMatchRoom(
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env,
   } as unknown as Party.Party;
 
   const room = new MatchRoom(party);
@@ -2196,5 +2197,98 @@ describe("Task 13: integration smoke test", () => {
       const potTotal = view.pots.reduce((sum, p) => sum + p.amount, 0);
       expect(seatTotal + potTotal).toBe(TOTAL);
     }
+  });
+});
+
+// ---------- Task 14: report-match wiring in endMatch ----------
+
+describe("endMatch report-match wiring (Task 14)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("14.1: fires fetch to SUPABASE_URL/functions/v1/report-match when env vars are set", () => {
+    const fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", (url: string, init: RequestInit) => {
+      fetchCalls.push({ url, init });
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    });
+
+    const { room } = makeEndMatchRoom(
+      [{ id: "human-1", stack: 600 }, { id: "human-2", stack: 400 }],
+      [],
+      {
+        SUPABASE_JWT_SECRET: "test-secret",
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-key-xyz",
+      },
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]!.url).toBe(
+      "https://example.supabase.co/functions/v1/report-match",
+    );
+    const body = JSON.parse(fetchCalls[0]!.init.body as string) as {
+      roomId: string;
+      format: string;
+      finishPlaceById: Record<string, number>;
+      eloDeltas: Record<string, number>;
+    };
+    expect(body.roomId).toBe("test-room");
+    expect(body.format).toBe("turbo");
+    expect(body.finishPlaceById["human-1"]).toBeDefined();
+    expect(body.eloDeltas["human-1"]).toBeDefined();
+    const authHeader = (fetchCalls[0]!.init.headers as Record<string, string>)["Authorization"];
+    expect(authHeader).toBe("Bearer service-key-xyz");
+  });
+
+  it("14.2: does NOT fire fetch in dev mode (no SUPABASE_JWT_SECRET)", () => {
+    const fetchCalls: unknown[] = [];
+    vi.stubGlobal("fetch", (...args: unknown[]) => {
+      fetchCalls.push(args);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+
+    const { room } = makeEndMatchRoom(
+      [{ id: "human-1", stack: 600 }],
+      [],
+      {}, // no env vars = dev mode
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("14.3: bot IDs are excluded from the payload", () => {
+    const fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", (url: string, init: RequestInit) => {
+      fetchCalls.push({ url, init });
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    });
+
+    const { room } = makeEndMatchRoom(
+      [{ id: "human-1", stack: 600 }, { id: "bot-0", stack: 400 }],
+      [],
+      {
+        SUPABASE_JWT_SECRET: "test-secret",
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "service-key-xyz",
+      },
+    );
+
+    (room as unknown as { endMatch(): void }).endMatch();
+
+    expect(fetchCalls).toHaveLength(1);
+    const body = JSON.parse(fetchCalls[0]!.init.body as string) as {
+      finishPlaceById: Record<string, number>;
+      eloDeltas: Record<string, number>;
+    };
+    // Bot keys must not be in the payload
+    expect(Object.keys(body.finishPlaceById)).not.toContain("bot-0");
+    expect(Object.keys(body.eloDeltas)).not.toContain("bot-0");
   });
 });

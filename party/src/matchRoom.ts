@@ -635,11 +635,42 @@ export default class MatchRoom implements Party.Server {
 
     const deltas = pairwiseElo(players, finishPlaceById, () => ELO_K_FACTOR);
 
+    // Filter bots out of the payload — no profile rows exist for them
+    const humanFinishPlaces: Record<string, number> = {};
+    const humanEloDeltas: Record<string, number> = {};
+    for (const [id, place] of Object.entries(finishPlaceById)) {
+      if (!id.startsWith("bot-")) {
+        humanFinishPlaces[id] = place;
+        humanEloDeltas[id] = deltas[id] ?? 0;
+      }
+    }
+
     this.party.broadcast(encode({
       t: "matchOver",
       finishPlaceById,
       eloDeltas: deltas,
     }));
+
+    const supabaseUrl = this.party.env["SUPABASE_URL"] as string | undefined;
+    const serviceKey = this.party.env["SUPABASE_SERVICE_ROLE_KEY"] as string | undefined;
+    const isDev = !this.party.env["SUPABASE_JWT_SECRET"] ||
+      this.party.env["SUPABASE_JWT_SECRET"] === "";
+
+    if (!isDev && supabaseUrl && serviceKey) {
+      void fetch(`${supabaseUrl}/functions/v1/report-match`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          roomId: this.party.id,
+          format: this.tableState.format,
+          finishPlaceById: humanFinishPlaces,
+          eloDeltas: humanEloDeltas,
+        }),
+      });
+    }
   }
 
   /** Exposed for tests — number of currently tracked connections. */
