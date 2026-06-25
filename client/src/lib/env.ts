@@ -4,5 +4,8 @@ export const SUPABASE_ANON_KEY: string = import.meta.env["VITE_SUPABASE_ANON_KEY
 
 /** True when pointing at a local PartyKit dev server (use dev:<id> tokens). */
 export function isDevHost(): boolean {
-  return PARTYKIT_HOST.startsWith("localhost") || PARTYKIT_HOST.startsWith("127.0.0.1");
+  // Anchor to the exact hostname (strip any port) so a host like
+  // "localhost.evil.com" cannot pass and receive an unsigned dev:<id> token.
+  const hostname = PARTYKIT_HOST.split(":")[0] ?? "";
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }
