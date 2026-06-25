@@ -2274,6 +2274,48 @@ describe("MatchRoom provisioning + matchInfo", () => {
     expect(err?.message).toBe("not_invited");
     expect(room.currentTableState).toBeNull();
   });
+
+  // Fix 2 regression tests: grace timer must not start an all-bot phantom match
+  describe("connect-grace: no phantom match when zero humans connect (fix 2)", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("does NOT start a match when no human connects before grace expires", async () => {
+      vi.useFakeTimers();
+      const { room } = makeProvisionRoom();
+      await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+        .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+
+      // Do NOT connect any player — advance past grace
+      const { DISCONNECT_GRACE_MS } = await import("@poker/shared");
+      await vi.advanceTimersByTimeAsync(DISCONNECT_GRACE_MS + 10);
+
+      // No phantom all-bot match should have started
+      expect(room.currentTableState).toBeNull();
+    });
+
+    it("DOES start a match when at least one expected human connects before grace expires", async () => {
+      vi.useFakeTimers();
+      const { room, conns } = makeProvisionRoom();
+      await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+        .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+
+      // Connect the expected human
+      const conn = { id: "c1", sent: [] as string[], send(m: string) { this.sent.push(m); }, close() {} };
+      conns.set("c1", conn);
+      room.onConnect(conn as unknown as Party.Connection);
+      await room.onMessage(encode({ t: "hello", jwt: "dev:h1" }), conn as unknown as Party.Connection);
+
+      // All expected humans seated — match starts immediately (grace cancelled)
+      expect(room.currentTableState).not.toBeNull();
+
+      // Advance past grace to ensure no double-start or error
+      const { DISCONNECT_GRACE_MS } = await import("@poker/shared");
+      await vi.advanceTimersByTimeAsync(DISCONNECT_GRACE_MS + 10);
+
+      // Match still started and state not reset
+      expect(room.currentTableState).not.toBeNull();
+    });
+  });
 });
 
 // ---------- Task 14: report-match wiring in endMatch ----------

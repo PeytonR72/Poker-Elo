@@ -97,6 +97,53 @@ describe("Lobby party", () => {
     expect(found).toBeUndefined();
   });
 
+  it("keeps players queued when match provisioning returns non-ok response (fix 1)", async () => {
+    const conns = new Map<string, FakeConn>();
+    const party = {
+      id: "lobby",
+      env: {},
+      getConnections: () => conns.values(),
+      broadcast: () => {},
+      context: {
+        parties: {
+          main: {
+            get: (_roomId: string) => ({
+              fetch: async (_init: { body: string }) => {
+                // Resolves (does NOT throw) with a non-ok response
+                return new Response(JSON.stringify({ error: "bad_roster" }), { status: 400 });
+              },
+            }),
+          },
+        },
+      },
+    } as unknown as Party.Party;
+    const lobby = new Lobby(party);
+
+    const conn = await connect(lobby, conns, "user-1");
+    await lobby.onMessage(encode({ t: "enqueue", rating: 400, format: "turbo" }), conn as unknown as Party.Connection);
+
+    await lobby.runMatchTick();
+
+    // Player must still be in the queue — NOT dropped on non-ok provisioning response
+    expect(lobby.waiterCount).toBe(1);
+    // No matchFound message should have been sent
+    const found = conn.sent.map((s) => JSON.parse(s)).find((m: { t: string }) => m.t === "matchFound");
+    expect(found).toBeUndefined();
+  });
+
+  it("rejects unknown format string with bad_enqueue error (fix 3)", async () => {
+    const { lobby, conns } = makeLobby([]);
+    const conn = await connect(lobby, conns, "user-1");
+    await lobby.onMessage(
+      encode({ t: "enqueue", rating: 400, format: "not-a-format" }),
+      conn as unknown as Party.Connection,
+    );
+
+    expect(lobby.waiterCount).toBe(0);
+    const err = conn.sent.map((s) => JSON.parse(s)).find((m: { t: string }) => m.t === "error");
+    expect(err?.message).toBe("bad_enqueue");
+  });
+
   it("provisions a MatchRoom and sends matchFound on a bot-filled tick", async () => {
     const provisioned: Array<{ roomId: string; body: unknown }> = [];
     const { lobby, conns } = makeLobby(provisioned);

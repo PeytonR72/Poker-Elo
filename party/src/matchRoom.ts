@@ -123,9 +123,13 @@ export default class MatchRoom implements Party.Server {
     this.provisionedFormat = format;
     this.expectedHumanIds = new Set(humanIds);
     // Start once every expected human connects, or bot-fill after the connect grace.
+    // Only start if at least one expected human is actually seated; otherwise leave idle.
     this.connectGraceTimer = setTimeout(() => {
       this.connectGraceTimer = null;
-      this.startMatch();
+      const anyHumanSeated = [...this.players.values()].some(
+        (p) => p.authed && this.expectedHumanIds.has(p.playerId),
+      );
+      if (anyHumanSeated) this.startMatch();
     }, DISCONNECT_GRACE_MS);
     return new Response("OK");
   }

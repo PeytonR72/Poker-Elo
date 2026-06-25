@@ -5,6 +5,7 @@ import {
   makeRoomCode,
   QUEUE_MATCH_INTERVAL_MS,
   MATCH_CODE_LENGTH,
+  MATCH_FORMATS,
 } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { formMatches, botFillEtaSec } from "./matchmaker.js";
@@ -65,7 +66,7 @@ export default class Lobby implements Party.Server {
 
     if (msg.t === "enqueue") {
       const rating = typeof msg.rating === "number" ? msg.rating : null;
-      const format = typeof msg.format === "string" ? msg.format : null;
+      const format = typeof msg.format === "string" && msg.format in MATCH_FORMATS ? msg.format : null;
       if (rating === null || format === null) {
         sender.send(encode({ t: "error", message: "bad_enqueue" }));
         return;
@@ -127,14 +128,16 @@ export default class Lobby implements Party.Server {
 
     for (const match of matches) {
       const roomId = makeRoomCode(MATCH_CODE_LENGTH, Math.random);
+      let res: Response;
       try {
-        await this.party.context.parties["main"]!.get(roomId).fetch({
+        res = await this.party.context.parties["main"]!.get(roomId).fetch({
           method: "POST",
           body: JSON.stringify({ format: match.format, humanIds: match.humanIds }),
         });
       } catch {
         continue; // provisioning failed — leave players queued for the next tick
       }
+      if (!res.ok) continue; // non-ok response (e.g. 400) — leave players queued
       for (const playerId of match.humanIds) {
         provisioned.add(playerId);
         const waiter = this.waiters.get(playerId);
