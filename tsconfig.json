@@ -5,7 +5,8 @@
   },
   "references": [
     { "path": "./shared" },
-    { "path": "./party" }
+    { "path": "./party" },
+    { "path": "./client" }
   ],
   "files": []
 }
