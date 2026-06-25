@@ -122,7 +122,8 @@ export default class Lobby implements Party.Server {
     if (this.waiters.size === 0) return;
     const now = Date.now();
     const onlineCount = this.waiters.size;
-    const { matches, matchedIds } = formMatches([...this.waiters.values()], now, onlineCount);
+    const { matches } = formMatches([...this.waiters.values()], now, onlineCount);
+    const provisioned = new Set<string>();
 
     for (const match of matches) {
       const roomId = makeRoomCode(MATCH_CODE_LENGTH, Math.random);
@@ -135,12 +136,13 @@ export default class Lobby implements Party.Server {
         continue; // provisioning failed — leave players queued for the next tick
       }
       for (const playerId of match.humanIds) {
+        provisioned.add(playerId);
         const waiter = this.waiters.get(playerId);
         if (waiter) this.sendTo(waiter.connId, { t: "matchFound", roomId, format: match.format });
       }
     }
 
-    for (const id of matchedIds) this.waiters.delete(id);
+    for (const id of provisioned) this.waiters.delete(id);
     if (this.waiters.size === 0) this.stopTicker();
     else this.broadcastQueueStatus();
   }

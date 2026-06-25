@@ -64,6 +64,39 @@ describe("Lobby party", () => {
     expect(lobby.waiterCount).toBe(0);
   });
 
+  it("keeps players queued when match provisioning fails (fetch throws)", async () => {
+    const conns = new Map<string, FakeConn>();
+    const party = {
+      id: "lobby",
+      env: {},
+      getConnections: () => conns.values(),
+      broadcast: () => {},
+      context: {
+        parties: {
+          main: {
+            get: (_roomId: string) => ({
+              fetch: async (_init: { body: string }) => {
+                throw new Error("provisioning failed");
+              },
+            }),
+          },
+        },
+      },
+    } as unknown as Party.Party;
+    const lobby = new Lobby(party);
+
+    const conn = await connect(lobby, conns, "user-1");
+    await lobby.onMessage(encode({ t: "enqueue", rating: 400, format: "turbo" }), conn as unknown as Party.Connection);
+
+    await lobby.runMatchTick();
+
+    // Player must still be in the queue — NOT dropped on provisioning failure
+    expect(lobby.waiterCount).toBe(1);
+    // No matchFound message should have been sent
+    const found = conn.sent.map((s) => JSON.parse(s)).find((m: { t: string }) => m.t === "matchFound");
+    expect(found).toBeUndefined();
+  });
+
   it("provisions a MatchRoom and sends matchFound on a bot-filled tick", async () => {
     const provisioned: Array<{ roomId: string; body: unknown }> = [];
     const { lobby, conns } = makeLobby(provisioned);
