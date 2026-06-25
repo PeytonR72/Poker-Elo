@@ -96,7 +96,39 @@ export default class MatchRoom implements Party.Server {
   private seatRngs: Array<(() => number) | null> = [];
   private botRngSeed = 0;
 
+  private provisioned = false;
+  private provisionedFormat: string | null = null;
+  private expectedHumanIds: Set<string> = new Set();
+  private connectGraceTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(readonly party: Party.Party) {}
+
+  async onRequest(req: Party.Request): Promise<Response> {
+    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+    if (this.provisioned || this.tableState !== null) return new Response("OK"); // idempotent
+    let body: { format?: unknown; humanIds?: unknown };
+    try {
+      body = (await req.json()) as { format?: unknown; humanIds?: unknown };
+    } catch {
+      return new Response(JSON.stringify({ error: "invalid_json" }), { status: 400 });
+    }
+    const format = typeof body.format === "string" ? body.format : null;
+    const humanIds = Array.isArray(body.humanIds)
+      ? body.humanIds.filter((x): x is string => typeof x === "string")
+      : null;
+    if (!format || !humanIds || humanIds.length === 0) {
+      return new Response(JSON.stringify({ error: "bad_roster" }), { status: 400 });
+    }
+    this.provisioned = true;
+    this.provisionedFormat = format;
+    this.expectedHumanIds = new Set(humanIds);
+    // Start once every expected human connects, or bot-fill after the connect grace.
+    this.connectGraceTimer = setTimeout(() => {
+      this.connectGraceTimer = null;
+      this.startMatch();
+    }, DISCONNECT_GRACE_MS);
+    return new Response("OK");
+  }
 
   onConnect(conn: Party.Connection): void {
     this.players.set(conn.id, { playerId: "", seatIndex: null, authed: false, timebankMs: 0 });
@@ -284,6 +316,16 @@ export default class MatchRoom implements Party.Server {
       if (this.tableState) {
         const view = redactFor(playerId, this.tableState);
         sender.send(encode({ t: "snapshot", view }));
+        const rFormat = this.tableState.format;
+        const rFmt = MATCH_FORMATS[rFormat];
+        if (rFmt) {
+          sender.send(encode({
+            t: "matchInfo",
+            format: rFormat,
+            matchStartMs: this.matchStartMs,
+            matchDurationMs: rFmt.matchDurationMs,
+          }));
+        }
 
         // If it's this player's turn, cancel the stale timer and restart via sendYourTurn()
         // (TurnTimer.start() calls cancel() internally, so sendYourTurn() handles both)
@@ -296,6 +338,13 @@ export default class MatchRoom implements Party.Server {
         }
       }
 
+      return;
+    }
+
+    // Provisioned rooms only admit invited humans.
+    if (this.provisioned && !this.expectedHumanIds.has(playerId)) {
+      sender.send(encode({ t: "error", message: "not_invited" }));
+      sender.close();
       return;
     }
 
@@ -320,9 +369,20 @@ export default class MatchRoom implements Party.Server {
 
     sender.send(encode({ t: "seated", seatIndex, playerId }));
 
-    // Start match when all TABLE_SIZE seats are filled
+    // Start match when the table is full, or (provisioned) when all invited humans are seated.
     const authedCount = [...this.players.values()].filter((p) => p.authed).length;
-    if (authedCount === TABLE_SIZE) {
+    if (this.provisioned) {
+      const seatedExpected = [...this.players.values()].filter(
+        (p) => p.authed && this.expectedHumanIds.has(p.playerId),
+      ).length;
+      if (seatedExpected >= this.expectedHumanIds.size) {
+        if (this.connectGraceTimer !== null) {
+          clearTimeout(this.connectGraceTimer);
+          this.connectGraceTimer = null;
+        }
+        this.startMatch();
+      }
+    } else if (authedCount === TABLE_SIZE) {
       this.startMatch();
     }
   }
@@ -330,7 +390,8 @@ export default class MatchRoom implements Party.Server {
   /** Start the match: build seats, deal first hand, broadcast snapshots. */
   private startMatch(): void {
     if (this.tableState !== null) return;
-    const format = MATCH_FORMATS[DEFAULT_FORMAT]!;
+    const formatId = this.provisionedFormat ?? DEFAULT_FORMAT;
+    const format = MATCH_FORMATS[formatId] ?? MATCH_FORMATS[DEFAULT_FORMAT]!;
     const elapsedMs = 0; // first hand
     const { sb, bb } = blindLevelAt(elapsedMs, format);
 
@@ -354,7 +415,7 @@ export default class MatchRoom implements Party.Server {
       deck,
       handNumber: this.handNumber,
       elapsedMs,
-      format: DEFAULT_FORMAT,
+      format: formatId,
     });
     this.handNumber++;
 
@@ -370,6 +431,12 @@ export default class MatchRoom implements Party.Server {
     this.broadcastSnapshots();
     this.sendDealPrivate();
     this.sendYourTurn();
+    this.party.broadcast(encode({
+      t: "matchInfo",
+      format: formatId,
+      matchStartMs: this.matchStartMs,
+      matchDurationMs: format.matchDurationMs,
+    }));
   }
 
   /** Send a redacted snapshot to each authed connected player. */
@@ -708,6 +775,16 @@ export default class MatchRoom implements Party.Server {
   /** Exposed for tests — seatRngs array. */
   get currentSeatRngs(): Array<(() => number) | null> {
     return this.seatRngs;
+  }
+
+  /** Exposed for tests — provisioning status. */
+  get isProvisioned(): boolean {
+    return this.provisioned;
+  }
+
+  /** Exposed for tests — expected human roster. */
+  get expectedHumans(): Set<string> {
+    return this.expectedHumanIds;
   }
 }
 
