@@ -1,5 +1,5 @@
 import type React from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ActionMask } from "@poker/shared";
 import { maskToButtons, clampRaiseTo, formatChips } from "./viewHelpers.js";
 
@@ -12,6 +12,10 @@ export default function ActionBar({
 }) {
   const b = maskToButtons(mask);
   const [raiseTo, setRaiseTo] = useState<number>(mask.minRaiseTo);
+
+  useEffect(() => {
+    setRaiseTo(mask.minRaiseTo);
+  }, [mask]);
 
   return (
     <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", padding: 12 }}>

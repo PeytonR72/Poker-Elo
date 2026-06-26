@@ -47,6 +47,7 @@ export default function AuthScreen({ auth }: { auth: SessionApi }) {
         <input type="email" placeholder="email" value={email} required
           onChange={(e) => setEmail(e.target.value)} style={{ padding: 10 }} />
         <input type="password" placeholder="password" value={password} required minLength={6}
+          autoComplete={mode === "in" ? "current-password" : "new-password"}
           onChange={(e) => setPassword(e.target.value)} style={{ padding: 10 }} />
         <button type="submit" disabled={busy} style={{ padding: 10, background: "#2d7d46", color: "white", border: 0, borderRadius: 6 }}>
           {mode === "in" ? "Sign in" : "Create account"}
