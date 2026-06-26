@@ -146,9 +146,17 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
   A 32-bit seed from a CSPRNG is acceptable; a 128-bit seed is preferred. Violation exposes
   opponents' hole cards to an attacker who can brute-force ~4B deck states from community cards.
 
+## Deployment
+
+- **Client**: https://client-coral-eight-91.vercel.app (Vercel, production). Build: `npm run build --workspace @poker/client` from repo root; output `client/dist`. Env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PARTYKIT_HOST`) set in Vercel project `peytonr7272-gmailcoms-projects/client`.
+- **Supabase**: live project `wydnwnitnexifndwdsmg` (us-west-2). Both migrations applied. `report-match` edge function deployed and ACTIVE.
+- **PartyKit**: NOT deployed to cloud (partykit.dev platform hit Cloudflare's 10k domain limit). Run `npx partykit dev` locally (port 1999) for gameplay. Future hosting options: Cloudflare Workers Paid ($5/mo via `partykit deploy`) or Fly.io free tier (run partykit dev in a container). When deployed, update `VITE_PARTYKIT_HOST` in Vercel env and redeploy.
+- **PartyKit cloud secrets**: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` already set via `npx partykit env add` (stored encrypted in PartyKit Cloud, ready for when deploy becomes possible).
+- **Windows dev**: `npx partykit dev` and `npx partykit deploy` work on Windows (patch applied via `patch-package`; `postinstall` re-applies after `npm install`).
+
 ## Status
 
-**Build Units 1–5 are complete** (all `npm test` / `typecheck` / `lint` / `vite build` green):
+**Build Units 1–6 are complete:**
 - **Unit 1** — scaffold + pure engine (`shared/`).
 - **Unit 2** — PartyKit `MatchRoom`: server-authoritative deal, action loop, turn timer/timebank,
   match clock/blinds/bust/end, ELO deltas, disconnect grace, bot runner.
@@ -159,8 +167,11 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 - **Unit 5** — Read-side UI: username migration + auth capture, `displayName` helper, leaderboard
   (top-100 + own-rank), profile + match history, Home tabbed shell, `MatchOver` uses centralized
   `displayName`. All pure cores tested; hooks do Supabase I/O; components are thin.
+- **Unit 6** — Production deployment: client live on Vercel, `report-match` edge function deployed,
+  PartyKit Windows dev crash fixed (patch-package). PartyKit cloud hosting deferred (platform limit);
+  gameplay requires local `npx partykit dev` until a hosting solution is chosen.
 
-**Not yet done / next:** nothing is deployed (no live PartyKit/Supabase wiring).
+**Not yet done / next:** PartyKit cloud hosting (Cloudflare Workers Paid or Fly.io).
 
 ## Working practice
 
