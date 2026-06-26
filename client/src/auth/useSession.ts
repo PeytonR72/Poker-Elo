@@ -9,7 +9,7 @@ export interface SessionApi {
   loading: boolean;
   getJwt: () => string | null;
   signIn: (email: string, password: string) => Promise<string | null>;
-  signUp: (email: string, password: string) => Promise<string | null>;
+  signUp: (email: string, password: string, username: string) => Promise<string | null>;
   signOut: () => Promise<void>;
 }
 
@@ -18,10 +18,12 @@ export function useSession(): SessionApi {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -39,10 +41,17 @@ export function useSession(): SessionApi {
     return error ? error.message : null;
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string): Promise<string | null> => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    return error ? error.message : null;
-  }, []);
+  const signUp = useCallback(
+    async (email: string, password: string, username: string): Promise<string | null> => {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { username } },
+      });
+      return error ? error.message : null;
+    },
+    [],
+  );
 
   const signOut = useCallback(async (): Promise<void> => {
     await supabase.auth.signOut();
