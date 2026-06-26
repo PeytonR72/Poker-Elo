@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSession } from "./auth/useSession.js";
 import AuthScreen from "./auth/AuthScreen.js";
-import LobbyScreen from "./lobby/LobbyScreen.js";
+import Home from "./home/Home.js";
 import GameScreen from "./game/GameScreen.js";
 
 export default function App() {
@@ -22,10 +22,5 @@ export default function App() {
     );
   }
 
-  return (
-    <LobbyScreen
-      auth={auth}
-      onMatchFound={(roomId, format) => setMatch({ roomId, format })}
-    />
-  );
+  return <Home auth={auth} onMatchFound={(roomId, format) => setMatch({ roomId, format })} />;
 }
