@@ -1,0 +1,22 @@
+diff --git a/node_modules/partykit/dist/bin.mjs b/node_modules/partykit/dist/bin.mjs
+index f7642b4..95649ee 100644
+--- a/node_modules/partykit/dist/bin.mjs
++++ b/node_modules/partykit/dist/bin.mjs
+@@ -93065,7 +93065,7 @@ function useDev(options) {
+       let binModules = {};
+       const workerFacade = fs12.readFileSync(
+         fileURLToPath7(
+-          path14.join(path14.dirname(import.meta.url), "../dist/generated.js")
++          new URL("../dist/generated.js", import.meta.url)
+         ),
+         "utf8"
+       );
+@@ -93105,7 +93105,7 @@ Workers["${name2}"] = ${name2};
+         metafile: true,
+         inject: [
+           fileURLToPath7(
+-            path14.join(path14.dirname(import.meta.url), "../inject-process.js")
++            new URL("../inject-process.js", import.meta.url)
+           )
+         ],
+         define: {
