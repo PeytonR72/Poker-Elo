@@ -29,7 +29,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 ## Workspaces
 
 - `shared/` `@poker/shared` — pure engine (Build Unit 1 complete).
-- `client/` — React/Vite SPA: auth → lobby → felt-table game (Build Unit 4 complete).
+- `client/` — React/Vite SPA: auth → Home (Play/Leaderboard/Profile tabs) → felt-table game (Build Units 4–5 complete).
 - `party/` — PartyKit `MatchRoom` + matchmaking `lobby` party (Build Units 2 & 4 complete).
 - `supabase/` — `profiles`/`matches`/`match_results` migration + `report-match` edge fn (Build Unit 3 complete).
 
@@ -84,7 +84,7 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 
 | File | Exports / Role |
 |---|---|
-| `App.tsx` | Screen router: loading → `AuthScreen` → (`match` set) `GameScreen` → else `LobbyScreen` |
+| `App.tsx` | Screen router: loading → `AuthScreen` → (`match` set) `GameScreen` → else `Home` |
 | `lib/env.ts` | `PARTYKIT_HOST`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `isDevHost()` (exact-hostname match) |
 | `lib/supabase.ts` | configured `supabase` client |
 | `auth/useSession.ts` | Supabase session hook; `getJwt()` → `dev:<id>` on local host, else `access_token` |
