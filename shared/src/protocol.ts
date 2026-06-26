@@ -9,7 +9,9 @@ export type ClientMsg =
   | { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number }
   | { t: "sitOut" }
   | { t: "ping"; ts: number }
-  | { t: "startMatch" };
+  | { t: "startMatch" }
+  | { t: "enqueue"; rating: number; format: string }
+  | { t: "leave" };
 
 export type ServerMsg =
   | { t: "seated"; seatIndex: number; playerId: string }
@@ -19,6 +21,9 @@ export type ServerMsg =
   | { t: "yourTurn"; mask: ActionMask; deadlineTs: number }
   | { t: "timebankUsed"; seatIdx: number; remainingMs: number }
   | { t: "matchOver"; finishPlaceById: Record<string, number>; eloDeltas: Record<string, number> }
+  | { t: "matchInfo"; format: string; matchStartMs: number; matchDurationMs: number }
+  | { t: "queueStatus"; waiting: number; position: number; etaSec: number }
+  | { t: "matchFound"; roomId: string; format: string }
   | { t: "error"; message: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {

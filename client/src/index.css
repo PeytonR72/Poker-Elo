@@ -1,0 +1,10 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #0e1116;
+  color: #e6e6e6;
+}
+button { font: inherit; cursor: pointer; }
+input { font: inherit; }

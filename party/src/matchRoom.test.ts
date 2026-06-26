@@ -2200,6 +2200,124 @@ describe("Task 13: integration smoke test", () => {
   });
 });
 
+// ---------- Task: provisioning + matchInfo ----------
+
+describe("MatchRoom provisioning + matchInfo", () => {
+  function makeProvisionRoom(env: Record<string, string> = {}): {
+    room: MatchRoom;
+    broadcasts: string[];
+    conns: Map<string, { id: string; sent: string[]; send(m: string): void; close(): void }>;
+  } {
+    const broadcasts: string[] = [];
+    const conns = new Map<string, { id: string; sent: string[]; send(m: string): void; close(): void }>();
+    const party = {
+      id: "room-1",
+      env,
+      getConnections: () => conns.values(),
+      broadcast: (m: string) => { broadcasts.push(m); },
+    } as unknown as Party.Party;
+    return { room: new MatchRoom(party), broadcasts, conns };
+  }
+
+  function req(body: unknown): Party.Request {
+    return { method: "POST", json: async () => body } as unknown as Party.Request;
+  }
+
+  it("stores the expected roster + format from a provision request", async () => {
+    const { room } = makeProvisionRoom();
+    await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+      .onRequest(req({ format: "rapid", humanIds: ["h1", "h2"] }));
+    expect((room as unknown as { isProvisioned: boolean }).isProvisioned).toBe(true);
+    expect([...(room as unknown as { expectedHumans: Set<string> }).expectedHumans]).toEqual(["h1", "h2"]);
+  });
+
+  it("starts the match (bot-filling) when all expected humans are seated", async () => {
+    const { room, conns } = makeProvisionRoom();
+    await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+      .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+
+    const conn = { id: "c1", sent: [] as string[], send(m: string) { this.sent.push(m); }, close() {} };
+    conns.set("c1", conn);
+    room.onConnect(conn as unknown as Party.Connection);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:h1" }), conn as unknown as Party.Connection);
+
+    expect(room.currentTableState).not.toBeNull();
+    expect(room.currentTableState!.format).toBe("turbo");
+  });
+
+  it("broadcasts matchInfo on match start", async () => {
+    const { room, broadcasts, conns } = makeProvisionRoom();
+    await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+      .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+    const conn = { id: "c1", sent: [] as string[], send(m: string) { this.sent.push(m); }, close() {} };
+    conns.set("c1", conn);
+    room.onConnect(conn as unknown as Party.Connection);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:h1" }), conn as unknown as Party.Connection);
+
+    const info = broadcasts.map((b) => JSON.parse(b)).find((m) => m.t === "matchInfo");
+    expect(info).toBeDefined();
+    expect(info.format).toBe("turbo");
+    expect(info.matchDurationMs).toBe(MATCH_FORMATS["turbo"]!.matchDurationMs);
+    expect(typeof info.matchStartMs).toBe("number");
+  });
+
+  it("rejects a player not on the provisioned roster", async () => {
+    const { room, conns } = makeProvisionRoom();
+    await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+      .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+    const conn = { id: "c2", sent: [] as string[], send(m: string) { this.sent.push(m); }, close() {} };
+    conns.set("c2", conn);
+    room.onConnect(conn as unknown as Party.Connection);
+    await room.onMessage(encode({ t: "hello", jwt: "dev:stranger" }), conn as unknown as Party.Connection);
+
+    const err = conn.sent.map((s) => JSON.parse(s)).find((m) => m.t === "error");
+    expect(err?.message).toBe("not_invited");
+    expect(room.currentTableState).toBeNull();
+  });
+
+  // Fix 2 regression tests: grace timer must not start an all-bot phantom match
+  describe("connect-grace: no phantom match when zero humans connect (fix 2)", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("does NOT start a match when no human connects before grace expires", async () => {
+      vi.useFakeTimers();
+      const { room } = makeProvisionRoom();
+      await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+        .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+
+      // Do NOT connect any player — advance past grace
+      const { DISCONNECT_GRACE_MS } = await import("@poker/shared");
+      await vi.advanceTimersByTimeAsync(DISCONNECT_GRACE_MS + 10);
+
+      // No phantom all-bot match should have started
+      expect(room.currentTableState).toBeNull();
+    });
+
+    it("DOES start a match when at least one expected human connects before grace expires", async () => {
+      vi.useFakeTimers();
+      const { room, conns } = makeProvisionRoom();
+      await (room as unknown as { onRequest(r: Party.Request): Promise<Response> })
+        .onRequest(req({ format: "turbo", humanIds: ["h1"] }));
+
+      // Connect the expected human
+      const conn = { id: "c1", sent: [] as string[], send(m: string) { this.sent.push(m); }, close() {} };
+      conns.set("c1", conn);
+      room.onConnect(conn as unknown as Party.Connection);
+      await room.onMessage(encode({ t: "hello", jwt: "dev:h1" }), conn as unknown as Party.Connection);
+
+      // All expected humans seated — match starts immediately (grace cancelled)
+      expect(room.currentTableState).not.toBeNull();
+
+      // Advance past grace to ensure no double-start or error
+      const { DISCONNECT_GRACE_MS } = await import("@poker/shared");
+      await vi.advanceTimersByTimeAsync(DISCONNECT_GRACE_MS + 10);
+
+      // Match still started and state not reset
+      expect(room.currentTableState).not.toBeNull();
+    });
+  });
+});
+
 // ---------- Task 14: report-match wiring in endMatch ----------
 
 describe("endMatch report-match wiring (Task 14)", () => {
