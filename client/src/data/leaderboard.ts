@@ -30,14 +30,22 @@ export function buildLeaderboard(
   const sorted = [...rows].sort(
     (a, b) => b.rating - a.rating || displayName(a).localeCompare(displayName(b)),
   );
-  const entries: LeaderboardEntry[] = sorted.map((r, i) => ({
-    position: i + 1,
+  let prevRating: number | undefined;
+  let prevPosition = 0;
+  const entries: LeaderboardEntry[] = sorted.map((r, i) => {
+    if (prevRating === undefined || r.rating !== prevRating) {
+      prevPosition = i + 1;
+      prevRating = r.rating;
+    }
+    return {
+    position: prevPosition,
     id: r.id,
     name: displayName(r),
     rating: r.rating,
     gamesPlayed: r.games_played,
     isOwn: r.id === ownId,
-  }));
+    };
+  });
 
   const inTop = ownId != null && entries.some((e) => e.isOwn);
   if (!inTop && ownRow && ownPosition != null && ownRow.games_played > 0) {

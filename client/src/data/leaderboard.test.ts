@@ -13,7 +13,7 @@ describe("buildLeaderboard", () => {
       row({ id: "c", username: "Cy", rating: 600 }),
     ];
     const { entries } = buildLeaderboard(rows, null, null, null);
-    expect(entries.map((e) => [e.position, e.id])).toEqual([[1, "c"], [2, "b"], [3, "a"]]);
+    expect(entries.map((e) => [e.position, e.id])).toEqual([[1, "c"], [2, "b"], [2, "a"]]);
   });
 
   it("flags the own row when it is inside the list and adds no tail", () => {
@@ -36,6 +36,17 @@ describe("buildLeaderboard", () => {
     const rows = [row({ id: "a", rating: 500 })];
     const ownRow = row({ id: "me", rating: 400, games_played: 0 });
     expect(buildLeaderboard(rows, ownRow, 99, "me").ownTail).toBeUndefined();
+  });
+
+  it("skips position after a tie (competition ranking)", () => {
+    const rows = [
+      row({ id: "a", rating: 600 }),
+      row({ id: "b", rating: 500 }),
+      row({ id: "c", rating: 500 }),
+      row({ id: "d", rating: 400 }),
+    ];
+    const { entries } = buildLeaderboard(rows, null, null, null);
+    expect(entries.map((e) => e.position)).toEqual([1, 2, 2, 4]);
   });
 
   it("returns an empty board for no rows", () => {
