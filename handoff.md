@@ -26,6 +26,12 @@ All gates green: `npm test` (231), `npm run typecheck`, `npm run lint`, `npm run
 - `npx partykit dev` → http://localhost:1999. `npx partykit deploy` → blocked (see above).
 - Email confirmation is **ON** in Supabase Auth. To test signup: PATCH `mailer_autoconfirm: true` via management API, test, revert to `false`, delete test rows.
 
+## Known bugs (visible right now, fix first)
+
+1. **`auth_failed` on Play tab (local AND prod)** — `party/src/lobby.ts` and `party/src/matchRoom.ts` both have an `authenticate` method that only tries `parseDevToken` when `SUPABASE_JWT_SECRET` is empty. Now that the root `.env` has a real secret, `partykit dev` loads it and routes all tokens through `verifyJwt`, which rejects `dev:<id>` strings → `auth_failed`. Fix: rewrite `authenticate` in both files to always try `parseDevToken` first, then fall back to `verifyJwt` only for non-dev tokens. Add an explicit `DEV_TOKENS=true` guard in the root `.env` (not set in cloud secrets) so production can't be spoofed. Workaround until fixed: set `SUPABASE_JWT_SECRET=` (empty) in root `.env` and restart `npx partykit dev`.
+
+2. **Profile tab crashes with "Cannot coerce the result to a single JSON object"** — `useProfile` fetches the profile row with an embedded join to match history and calls `.single()`. When the user has match rows, PostgREST returns one row per match, `.single()` receives multiple rows and throws. Fix: split into two queries — `.single()` for the profile row alone, separate `.select()` (returning array) for match history.
+
 ## Deferred minors (non-blocking polish)
 
 - Home rating badge fetched once on mount — doesn't refresh after a match completes.
