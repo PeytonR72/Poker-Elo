@@ -84,4 +84,11 @@ describe("matchReducer", () => {
     const s = run([{ t: "error", message: "not_your_turn" }]);
     expect(s.error).toBe("not_your_turn");
   });
+
+  it("clears a stale error when a non-error message arrives", () => {
+    const s1 = run([{ t: "error", message: "not_your_turn" }]);
+    expect(s1.error).toBe("not_your_turn");
+    const s2 = matchReducer(s1, { t: "snapshot", view: view() });
+    expect(s2.error).toBeNull();
+  });
 });

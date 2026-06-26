@@ -21,19 +21,26 @@ export default function Home({
 }) {
   const [tab, setTab] = useState<Tab>("play");
   const [rating, setRating] = useState<number>(ELO_DEFAULT_RATING);
+  const [ratingError, setRatingError] = useState<string | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [profileFromTab, setProfileFromTab] = useState<Tab>("play");
 
   useEffect(() => {
     if (!auth.userId) return;
+    setRatingError(null);
     const timer = setTimeout(() => {
       supabase
         .from("profiles")
         .select("rating")
         .eq("id", auth.userId)
         .single()
-        .then(({ data }) => {
-          if (data && typeof data.rating === "number") setRating(data.rating);
+        .then(({ data, error }) => {
+          if (error) {
+            setRatingError(error.message);
+          } else {
+            setRatingError(null);
+            if (data && typeof data.rating === "number") setRating(data.rating);
+          }
         });
     }, 300);
     return () => clearTimeout(timer);
@@ -51,6 +58,7 @@ export default function Home({
         <h1 style={{ margin: 0 }}>PokerElo</h1>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <RatingBadge rating={rating} />
+          {ratingError && <span style={{ color: "#ff6b6b", fontSize: 12 }}>{ratingError}</span>}
           <button onClick={() => void auth.signOut()} style={{ background: "none", border: 0, color: "#7aa2f7" }}>
             Sign out
           </button>

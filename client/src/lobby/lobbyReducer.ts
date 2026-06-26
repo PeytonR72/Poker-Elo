@@ -27,9 +27,10 @@ export function lobbyReducer(state: LobbyUiState, msg: ServerMsg): LobbyUiState 
         waiting: msg.waiting,
         position: msg.position,
         etaSec: msg.etaSec,
+        error: null,
       };
     case "matchFound":
-      return { ...state, status: "matched", match: { roomId: msg.roomId, format: msg.format } };
+      return { ...state, status: "matched", match: { roomId: msg.roomId, format: msg.format }, error: null };
     case "error":
       return { ...state, error: msg.message };
     default:
