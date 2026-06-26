@@ -7,6 +7,7 @@ import GameScreen from "./game/GameScreen.js";
 export default function App() {
   const auth = useSession();
   const [match, setMatch] = useState<{ roomId: string; format: string } | null>(null);
+  const [ratingRefreshKey, setRatingRefreshKey] = useState(0);
 
   if (auth.loading) return <div style={{ padding: 24 }}>Loading…</div>;
   if (!auth.session) return <AuthScreen auth={auth} />;
@@ -17,10 +18,13 @@ export default function App() {
         roomId={match.roomId}
         getJwt={auth.getJwt}
         ownId={auth.userId}
-        onLeave={() => setMatch(null)}
+        onLeave={() => {
+          setMatch(null);
+          setRatingRefreshKey((k) => k + 1);
+        }}
       />
     );
   }
 
-  return <Home auth={auth} onMatchFound={(roomId, format) => setMatch({ roomId, format })} />;
+  return <Home auth={auth} onMatchFound={(roomId, format) => setMatch({ roomId, format })} ratingRefreshKey={ratingRefreshKey} />;
 }

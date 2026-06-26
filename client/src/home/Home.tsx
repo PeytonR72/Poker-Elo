@@ -13,27 +13,34 @@ const TAB_LABEL: Record<Tab, string> = { play: "Play", leaderboard: "Leaderboard
 export default function Home({
   auth,
   onMatchFound,
+  ratingRefreshKey,
 }: {
   auth: SessionApi;
   onMatchFound: (roomId: string, format: string) => void;
+  ratingRefreshKey: number;
 }) {
   const [tab, setTab] = useState<Tab>("play");
   const [rating, setRating] = useState<number>(ELO_DEFAULT_RATING);
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileFromTab, setProfileFromTab] = useState<Tab>("play");
 
   useEffect(() => {
     if (!auth.userId) return;
-    supabase
-      .from("profiles")
-      .select("rating")
-      .eq("id", auth.userId)
-      .single()
-      .then(({ data }) => {
-        if (data && typeof data.rating === "number") setRating(data.rating);
-      });
-  }, [auth.userId]);
+    const timer = setTimeout(() => {
+      supabase
+        .from("profiles")
+        .select("rating")
+        .eq("id", auth.userId)
+        .single()
+        .then(({ data }) => {
+          if (data && typeof data.rating === "number") setRating(data.rating);
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [auth.userId, ratingRefreshKey]);
 
   function openProfile(id: string) {
+    setProfileFromTab(tab);
     setProfileId(id);
     setTab("profile");
   }
@@ -68,7 +75,7 @@ export default function Home({
 
       {tab === "play" && <LobbyScreen auth={auth} rating={rating} onMatchFound={onMatchFound} />}
       {tab === "leaderboard" && <LeaderboardScreen ownId={auth.userId} onOpenProfile={openProfile} />}
-      {tab === "profile" && <ProfileScreen playerId={profileId ?? auth.userId} onBack={() => setTab("leaderboard")} />}
+      {tab === "profile" && <ProfileScreen playerId={profileId ?? auth.userId} onBack={() => setTab(profileFromTab)} />}
     </div>
   );
 }
