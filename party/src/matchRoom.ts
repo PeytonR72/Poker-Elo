@@ -272,12 +272,18 @@ export default class MatchRoom implements Party.Server {
     const jwtSecret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
     let playerId: string;
     try {
-      if (!jwtSecret || jwtSecret === "") {
-        // Dev mode: accept "dev:<id>" tokens
-        const dev = parseDevToken(jwt);
-        if (!dev) throw new Error("No JWT secret configured and token is not a dev token");
-        playerId = dev.sub;
+      // Always try parseDevToken first if token starts with "dev:"
+      if (jwt.startsWith("dev:")) {
+        if (process.env.DEV_TOKENS === "true") {
+          const dev = parseDevToken(jwt);
+          if (!dev) throw new Error("Invalid dev token");
+          playerId = dev.sub;
+        } else {
+          throw new Error("dev: tokens not allowed in production");
+        }
       } else {
+        // Otherwise verify as JWT
+        if (!jwtSecret) throw new Error("No JWT secret configured");
         const auth = await verifyJwt(jwt, jwtSecret);
         playerId = auth.sub;
       }

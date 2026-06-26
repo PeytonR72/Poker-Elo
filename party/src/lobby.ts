@@ -95,10 +95,17 @@ export default class Lobby implements Party.Server {
     if (typeof jwt !== "string") return null;
     const secret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
     try {
-      if (!secret || secret === "") {
-        const dev = parseDevToken(jwt);
-        return dev ? dev.sub : null;
+      // Always try parseDevToken first if token starts with "dev:"
+      if (jwt.startsWith("dev:")) {
+        if (process.env.DEV_TOKENS === "true") {
+          const dev = parseDevToken(jwt);
+          return dev ? dev.sub : null;
+        }
+        // dev: tokens not allowed in production
+        return null;
       }
+      // Otherwise verify as JWT
+      if (!secret) return null;
       const auth = await verifyJwt(jwt, secret);
       return auth.sub;
     } catch {

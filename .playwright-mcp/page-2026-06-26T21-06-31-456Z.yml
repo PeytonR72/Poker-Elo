@@ -1,0 +1,36 @@
+- generic [ref=e13]:
+  - banner [ref=e14]:
+    - heading "PokerElo" [level=1] [ref=e15]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: "400"
+        - generic [ref=e19]: Fish
+      - button "Sign out" [ref=e20] [cursor=pointer]
+  - navigation [ref=e21]:
+    - button "Play" [ref=e22] [cursor=pointer]
+    - button "Leaderboard" [active] [ref=e23] [cursor=pointer]
+    - button "Profile" [ref=e24] [cursor=pointer]
+  - table [ref=e34]:
+    - rowgroup [ref=e35]:
+      - row "# Player Rating Games" [ref=e36]:
+        - columnheader "#" [ref=e37]
+        - columnheader "Player" [ref=e38]
+        - columnheader "Rating" [ref=e39]
+        - columnheader "Games" [ref=e40]
+    - rowgroup [ref=e41]:
+      - row "1 shark_alice (you) 720 Limper 12" [ref=e42] [cursor=pointer]:
+        - cell "1" [ref=e43]
+        - cell "shark_alice (you)" [ref=e44]
+        - cell "720 Limper" [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: "720"
+            - generic [ref=e48]: Limper
+        - cell "12" [ref=e49]
+      - row "2 e2etester1 540 Limper 8" [ref=e50] [cursor=pointer]:
+        - cell "2" [ref=e51]
+        - cell "e2etester1" [ref=e52]
+        - cell "540 Limper" [ref=e53]:
+          - generic [ref=e54]:
+            - generic [ref=e55]: "540"
+            - generic [ref=e56]: Limper
+        - cell "8" [ref=e57]

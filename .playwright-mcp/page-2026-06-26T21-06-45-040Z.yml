@@ -1,0 +1,42 @@
+- generic [ref=e13]:
+  - banner [ref=e14]:
+    - heading "PokerElo" [level=1] [ref=e15]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: "400"
+        - generic [ref=e19]: Fish
+      - button "Sign out" [ref=e20] [cursor=pointer]
+  - navigation [ref=e21]:
+    - button "Play" [ref=e22] [cursor=pointer]
+    - button "Leaderboard" [ref=e23] [cursor=pointer]
+    - button "Profile" [ref=e24] [cursor=pointer]
+  - generic [ref=e58]:
+    - generic [ref=e59]:
+      - heading "shark_alice" [level=2] [ref=e60]
+      - generic [ref=e61]:
+        - generic [ref=e62]: "720"
+        - generic [ref=e63]: Limper
+    - paragraph [ref=e64]: "12 games · 1 wins · best finish #1"
+    - heading "Match history" [level=3] [ref=e65]
+    - table [ref=e66]:
+      - rowgroup [ref=e67]:
+        - row "Date Format Finish ELO Rating" [ref=e68]:
+          - columnheader "Date" [ref=e69]
+          - columnheader "Format" [ref=e70]
+          - columnheader "Finish" [ref=e71]
+          - columnheader "ELO" [ref=e72]
+          - columnheader "Rating" [ref=e73]
+      - rowgroup [ref=e74]:
+        - 'row "6/26/2026 Turbo #1 +24 720" [ref=e75]':
+          - cell "6/26/2026" [ref=e76]
+          - cell "Turbo" [ref=e77]
+          - cell "#1" [ref=e78]
+          - cell "+24" [ref=e79]
+          - cell "720" [ref=e80]
+        - 'row "6/26/2026 Rapid #3 -8 696" [ref=e81]':
+          - cell "6/26/2026" [ref=e82]
+          - cell "Rapid" [ref=e83]
+          - cell "#3" [ref=e84]
+          - cell "-8" [ref=e85]
+          - cell "696" [ref=e86]
+    - button "Back" [ref=e87] [cursor=pointer]

@@ -1,0 +1,20 @@
+- generic [ref=e13]:
+  - banner [ref=e14]:
+    - heading "PokerElo" [level=1] [ref=e15]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: "400"
+        - generic [ref=e19]: Fish
+      - button "Sign out" [ref=e20] [cursor=pointer]
+  - navigation [ref=e21]:
+    - button "Play" [active] [ref=e22] [cursor=pointer]
+    - button "Leaderboard" [ref=e23] [cursor=pointer]
+    - button "Profile" [ref=e24] [cursor=pointer]
+  - generic [ref=e30]:
+    - generic [ref=e31]:
+      - text: "Format:"
+      - combobox "Format:" [ref=e32]:
+        - option "Rapid"
+        - option "Turbo" [selected]
+        - option "Long"
+    - button "Find Match" [ref=e33] [cursor=pointer]

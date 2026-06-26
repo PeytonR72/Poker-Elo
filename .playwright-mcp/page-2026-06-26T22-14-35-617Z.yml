@@ -1,0 +1,22 @@
+- generic [ref=e13]:
+  - banner [ref=e14]:
+    - heading "PokerElo" [level=1] [ref=e15]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: "400"
+        - generic [ref=e19]: Fish
+      - button "Sign out" [ref=e20] [cursor=pointer]
+  - navigation [ref=e21]:
+    - button "Play" [ref=e22] [cursor=pointer]
+    - button "Leaderboard" [ref=e23] [cursor=pointer]
+    - button "Profile" [active] [ref=e24] [cursor=pointer]
+  - generic [ref=e30]:
+    - generic [ref=e31]:
+      - heading "smoketest" [level=2] [ref=e32]
+      - generic [ref=e33]:
+        - generic [ref=e34]: "400"
+        - generic [ref=e35]: Fish
+    - paragraph [ref=e36]: 0 games · 0 wins
+    - heading "Match history" [level=3] [ref=e37]
+    - paragraph [ref=e38]: No matches played yet.
+    - button "Back" [ref=e39] [cursor=pointer]
