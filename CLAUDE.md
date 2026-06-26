@@ -96,6 +96,15 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 | `game/viewHelpers.ts` | **pure** `maskToButtons`, `clampRaiseTo` (raise-TO), `blindLevelLabel`, `formatCard`, `formatChips` — tested |
 | `game/useMatchSocket.ts` | connects to `main` room, `hello` + `sendAction` |
 | `game/*.tsx` | `GameScreen`, `Table` (felt), `SeatView`, `Board`, `CardView`, `ActionBar`, `MatchClock`, `MatchOver` |
+| `data/displayName.ts` | `displayName` — player label (bot glyph / username / `player_<8>`) |
+| `data/leaderboard.ts` | `ProfileRow`, `LeaderboardEntry`, `Leaderboard`, `buildLeaderboard` |
+| `data/profile.ts` | `MatchResultRow`, `ProfileHeader`, `ProfileHistoryEntry`, `ProfileData`, `buildProfile` |
+| `home/Home.tsx` | `Home` — tabbed shell (Play/Leaderboard/Profile) + rating badge header |
+| `home/RatingBadge.tsx` | `RatingBadge` — rating + tier chip |
+| `leaderboard/useLeaderboard.ts` | `useLeaderboard` — top-100 + own-rank fetch |
+| `leaderboard/LeaderboardScreen.tsx` | `LeaderboardScreen` |
+| `profile/useProfile.ts` | `useProfile` — profile row + joined match history fetch |
+| `profile/ProfileScreen.tsx` | `ProfileScreen` |
 
 **Key conventions for `client/`:**
 - Dev mode is keyed on `isDevHost()` (host is exactly `localhost`/`127.0.0.1`, port stripped) — it
@@ -106,6 +115,7 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 - Vite-only; do not `import` CSS from `.tsx` (breaks `tsc`) — link the stylesheet from `index.html`.
   `client/tsconfig.json` is composite, emits to `.tsbuild` (gitignored), referenced by root `tsc -b`.
 - Run the client: `npm run dev` (inside `client/`); env via `client/.env` (see `.env.example`).
+- Pure shaping cores live in `client/src/data/` (tested); hooks do Supabase I/O; components are thin. Usernames come from `profiles.username` (added in `20260625000001_usernames.sql`, seeded by the `handle_new_user` trigger from signup metadata).
 
 ## Commands
 
@@ -138,7 +148,7 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 
 ## Status
 
-**Build Units 1–4 are complete** (all `npm test` / `typecheck` / `lint` / `vite build` green):
+**Build Units 1–5 are complete** (all `npm test` / `typecheck` / `lint` / `vite build` green):
 - **Unit 1** — scaffold + pure engine (`shared/`).
 - **Unit 2** — PartyKit `MatchRoom`: server-authoritative deal, action loop, turn timer/timebank,
   match clock/blinds/bust/end, ELO deltas, disconnect grace, bot runner.
@@ -146,10 +156,11 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
   `report-match` edge function, fire-and-forget wiring from `MatchRoom.endMatch()`.
 - **Unit 4** — React/Vite client (auth → lobby → felt-table game) + matchmaking `lobby` party,
   `MatchRoom` roster provisioning + `matchInfo`.
+- **Unit 5** — Read-side UI: username migration + auth capture, `displayName` helper, leaderboard
+  (top-100 + own-rank), profile + match history, Home tabbed shell, `MatchOver` uses centralized
+  `displayName`. All pure cores tested; hooks do Supabase I/O; components are thin.
 
-**Not yet done / next:** nothing is deployed (no live PartyKit/Supabase wiring); no leaderboard or
-profile/history UI reads the persisted tables; a handful of deferred client polish items remain.
-See `handoff.md` for the Build Unit 5 starting point and the deferred-items list.
+**Not yet done / next:** nothing is deployed (no live PartyKit/Supabase wiring).
 
 ## Working practice
 

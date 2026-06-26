@@ -1,3 +1,5 @@
+import { displayName } from "../data/displayName.js";
+
 export default function MatchOver({
   ownId,
   finishPlaceById,
@@ -21,7 +23,7 @@ export default function MatchOver({
             return (
               <tr key={id} style={{ fontWeight: id === ownId ? 700 : 400 }}>
                 <td>{place}</td>
-                <td>{id.startsWith("bot-") ? `🤖 ${id}` : id.slice(0, 8)}{id === ownId ? " (you)" : ""}</td>
+                <td>{displayName({ id })}{id === ownId ? " (you)" : ""}</td>
                 <td align="right" style={{ color: d >= 0 ? "#5dd39e" : "#ff6b6b" }}>{d >= 0 ? `+${d}` : d}</td>
               </tr>
             );
