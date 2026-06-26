@@ -8,7 +8,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 1. **All poker numbers live in `shared/src/constants.ts` ONCE.** Never hardcode a poker-numeric
    value (stack, blind, timer, K-factor, table size) anywhere else.
 2. **Server-authoritative.** The `shared/` engine is pure `(state, action) -> newState`, but only
-   the (future) PartyKit server runs mutating transitions on the real, secret deck. Clients send
+   the PartyKit server runs mutating transitions on the real, secret deck. Clients send
    intent only and receive `redactFor(...)` views — never the deck, seed, or foreign hole cards.
 
 ## Conventions
@@ -29,9 +29,9 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 ## Workspaces
 
 - `shared/` `@poker/shared` — pure engine (Build Unit 1 complete).
-- `client/` — React/Vite (placeholder).
-- `party/` — PartyKit rooms (Build Unit 2 complete).
-- `supabase/` — migrations + edge function (empty).
+- `client/` — React/Vite SPA: auth → lobby → felt-table game (Build Unit 4 complete).
+- `party/` — PartyKit `MatchRoom` + matchmaking `lobby` party (Build Units 2 & 4 complete).
+- `supabase/` — `profiles`/`matches`/`match_results` migration + `report-match` edge fn (Build Unit 3 complete).
 
 ## `shared/src` module map
 
@@ -42,7 +42,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 | `constants.ts` | `STARTING_STACK`, `TABLE_SIZE`, `MATCH_FORMATS`, `MATCH_CODE_LENGTH`, `RANK_TIERS`, `ELO_*`, `BOT_*`, `TIMEBANK_*`, `RANKED_MIN_ONLINE`, `QUEUE_MATCH_INTERVAL_MS`, `RATING_WINDOW_*`, `DISCONNECT_GRACE_MS`, `DEFAULT_FORMAT`, `HEADS_UP_EARLY_END`, `MATCH_GRACE_FINISH`, `RANKS`, `SUITS` |
 | `cards.ts` | `Card`, `makeCard`, `rankOf`, `suitOf`, `cardToString`, `cardFromString` |
 | `deck.ts` | `fullDeck`, `shuffledDeck` |
-| `protocol.ts` | `ClientMsg`, `ServerMsg`, `encode`, `decode` |
+| `protocol.ts` | `ClientMsg` (game: `hello`/`action`/`sitOut`/`ping`/`startMatch`; lobby: `enqueue`/`leave`), `ServerMsg` (game: `seated`/`dealPrivate`/`snapshot`/`event`/`yourTurn`/`timebankUsed`/`matchOver`/`matchInfo`/`error`; lobby: `queueStatus`/`matchFound`), `encode`, `decode` |
 | `handEval/index.ts` | `HandCategory`, `evaluate5`, `evaluate7`, `evaluate7Naive`, `pack` |
 | `engine/types.ts` | `Action`, `ActionType`, `ActionMask`, `GameEvent`, `Seat`, `SeatStatus`, `TableState`, `Street`, `Pot` |
 | `engine/state.ts` | `createSeat`, `createHand`, `cloneState` |
@@ -61,16 +61,51 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
 | File | Exports / Role |
 |---|---|
-| `matchRoom.ts` | `MatchRoom` — PartyKit `Party.Server`; full game loop, timers, ELO |
+| `matchRoom.ts` | `MatchRoom` — PartyKit `Party.Server` (the `main` party); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds }`), roster-aware start + bot-fill, `matchInfo` broadcast |
+| `lobby.ts` | `Lobby` — PartyKit `Party.Server` (the `lobby` party); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `this.party.context.parties.main.get(roomId).fetch(...)`, sends `queueStatus`/`matchFound` |
+| `matchmaker.ts` | `formMatches(waiters, now, onlineCount)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch` |
 | `auth.ts` | `verifyJwt(token, secret)`, `parseDevToken("dev:<id>")` |
 | `timers.ts` | `TurnTimer` — `start(ms, cb)` (auto-cancels previous), `cancel()` |
 | `botRunner.ts` | `decideBotAction(view, holeCards, mask, rng)`, `botThinkDelayMs(rng, min, max)` |
+
+Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lobby` = `lobby.ts`).
 
 **Key conventions for `party/`:**
 - `party.getConnections()` is an **iterable**, not a Map — iterate it; no `.get()`.
 - `timebankUsed` is broadcast BEFORE `yourTurn` so the client can update the clock first.
 - `pairwiseElo` deltas are applied independently per player (not assumed zero-sum).
 - CSPRNG seed: `crypto.getRandomValues(new Uint32Array(4))` XOR-folded to 32-bit.
+- A provisioned room only admits invited humans (`not_invited` otherwise); the grace timer
+  (`DISCONNECT_GRACE_MS`) bot-fills missing humans but does **not** start an all-bot match (zero
+  humans seated → room stays idle). `makeRoomCode` uses `Math.random` (room codes are not
+  deck-secret; rooms enforce the roster).
+
+## `client/src` module map
+
+| File | Exports / Role |
+|---|---|
+| `App.tsx` | Screen router: loading → `AuthScreen` → (`match` set) `GameScreen` → else `LobbyScreen` |
+| `lib/env.ts` | `PARTYKIT_HOST`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `isDevHost()` (exact-hostname match) |
+| `lib/supabase.ts` | configured `supabase` client |
+| `auth/useSession.ts` | Supabase session hook; `getJwt()` → `dev:<id>` on local host, else `access_token` |
+| `auth/AuthScreen.tsx` | email/password sign-in/up |
+| `lobby/lobbyReducer.ts` | **pure** `lobbyReducer` (lobby `ServerMsg` → `LobbyUiState`) — tested |
+| `lobby/useLobbySocket.ts` | connects to `lobby` party, enqueue/leave |
+| `lobby/LobbyScreen.tsx` | rating/rank (from `profiles`), queue UI |
+| `game/matchReducer.ts` | **pure** `matchReducer` (game `ServerMsg` → `MatchUiState`) — tested |
+| `game/viewHelpers.ts` | **pure** `maskToButtons`, `clampRaiseTo` (raise-TO), `blindLevelLabel`, `formatCard`, `formatChips` — tested |
+| `game/useMatchSocket.ts` | connects to `main` room, `hello` + `sendAction` |
+| `game/*.tsx` | `GameScreen`, `Table` (felt), `SeatView`, `Board`, `CardView`, `ActionBar`, `MatchClock`, `MatchOver` |
+
+**Key conventions for `client/`:**
+- Dev mode is keyed on `isDevHost()` (host is exactly `localhost`/`127.0.0.1`, port stripped) — it
+  gates the unsigned `dev:<userId>` token; never widen this to a prefix match.
+- Pure cores (`matchReducer`/`lobbyReducer`/`viewHelpers`) hold the logic and are unit-tested;
+  components stay thin. `import type React from "react"` is required wherever `React.CSSProperties`/
+  `React.FormEvent` is referenced (`react-jsx` runtime, no auto-global `React`).
+- Vite-only; do not `import` CSS from `.tsx` (breaks `tsc`) — link the stylesheet from `index.html`.
+  `client/tsconfig.json` is composite, emits to `.tsbuild` (gitignored), referenced by root `tsc -b`.
+- Run the client: `npm run dev` (inside `client/`); env via `client/.env` (see `.env.example`).
 
 ## Commands
 
@@ -103,11 +138,18 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
 ## Status
 
-**Build Unit 1 (scaffold + pure engine) is complete.**
-**Build Unit 2 (PartyKit `MatchRoom` server) is complete** — server-authoritative deal, private
-hole cards, action loop, turn timer/timebank, match clock/blinds/bust placement/end, ELO deltas,
-disconnect grace, and bot runner are all implemented and tested.
-Next unit: client UI (React/Vite) — connect to MatchRoom via PartyKit, render redacted views.
+**Build Units 1–4 are complete** (all `npm test` / `typecheck` / `lint` / `vite build` green):
+- **Unit 1** — scaffold + pure engine (`shared/`).
+- **Unit 2** — PartyKit `MatchRoom`: server-authoritative deal, action loop, turn timer/timebank,
+  match clock/blinds/bust/end, ELO deltas, disconnect grace, bot runner.
+- **Unit 3** — Supabase persistence: `profiles`/`matches`/`match_results` migration + RLS,
+  `report-match` edge function, fire-and-forget wiring from `MatchRoom.endMatch()`.
+- **Unit 4** — React/Vite client (auth → lobby → felt-table game) + matchmaking `lobby` party,
+  `MatchRoom` roster provisioning + `matchInfo`.
+
+**Not yet done / next:** nothing is deployed (no live PartyKit/Supabase wiring); no leaderboard or
+profile/history UI reads the persisted tables; a handful of deferred client polish items remain.
+See `handoff.md` for the Build Unit 5 starting point and the deferred-items list.
 
 ## Working practice
 
