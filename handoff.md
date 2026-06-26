@@ -1,71 +1,47 @@
-# PokerElo — Handoff for Build Unit 6
+# PokerElo — Handoff for Build Unit 7+
 
-Read `CLAUDE.md` first (authoritative: golden rules, conventions, module maps). This file is the
-orientation layer: where things stand and how to start Unit 6.
+Read `CLAUDE.md` first (authoritative: golden rules, conventions, module maps, deployment URLs).
 
 ## Where things stand
 
-Build Units 1–5 complete, merged to `master`, pushed to `origin`
-(https://github.com/PeytonR72/Poker-Elo). All gates green: `npm test` (231), `npm run typecheck`,
-`npm run lint`, `npm run build --workspace @poker/client`.
+Build Units 1–6 complete, merged to `master`, pushed to https://github.com/PeytonR72/Poker-Elo.
+All gates green: `npm test` (231), `npm run typecheck`, `npm run lint`, `npm run build --workspace @poker/client`.
 
-The app is **functionally complete end-to-end** (auth → Home tabs → matchmaking → server-authoritative
-game → ELO persistence → leaderboard/profile) but **NOT deployed**. Unit 5 (read-side UI) was verified
-in-browser against the live Supabase — all features work, no open defects.
+**What works live:**
+- Client: https://client-coral-eight-91.vercel.app — auth, Home (Play/Leaderboard/Profile tabs), Leaderboard, Profile. All Supabase-backed screens verified against the live project (`wydnwnitnexifndwdsmg`, us-west-2).
+- Supabase: both migrations applied, `report-match` edge function ACTIVE.
+- PartyKit local dev: `npx partykit dev` works on Windows (patch-package fix in `patches/partykit+0.0.108.patch`).
 
-## Environment facts (not in CLAUDE.md — you need these)
+**What doesn't work yet:**
+- **Gameplay requires local PartyKit** (`npx partykit dev`, port 1999). The Play tab / matchmaking / game loop will not function for remote users until PartyKit is cloud-hosted. `VITE_PARTYKIT_HOST` on Vercel is currently `localhost:1999`.
+- PartyKit cloud hosting was blocked by a platform-level Cloudflare domain limit on partykit.dev. The recommended path is **Cloudflare Workers Paid ($5/mo)** — `npx partykit deploy` is one command once a Cloudflare account is upgraded. All three required secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are already set in PartyKit Cloud via `partykit env add`. After deploy: update `VITE_PARTYKIT_HOST` in Vercel to the returned `*.partykit.dev` host and redeploy client.
 
-- **Live Supabase project** exists & linked: ref `wydnwnitnexifndwdsmg` (org `tpoxzdpfmcmismgbmqvc`),
-  region us-west-2. Both migrations (`..._init.sql`, `20260625000001_usernames.sql`) are **already
-  applied** to it. `client/.env` has real `VITE_SUPABASE_URL` + anon key.
-- **Email confirmation is ON** in that project's Auth settings → a fresh signup returns no session.
-- **`partykit.json` vars are empty placeholders** (`SUPABASE_JWT_SECRET`, `SUPABASE_URL`,
-  `SUPABASE_SERVICE_ROLE_KEY`) — fine for local dev (empty JWT secret → accepts `dev:<id>` tokens),
-  must be set for production.
-- **`npx partykit dev` crashes on this Windows machine** (`ERR_INVALID_URL` on `generated.js`). This
-  blocks local Play/matchmaking/game testing only; the Supabase-backed screens (auth, Home,
-  Leaderboard, Profile) work without PartyKit. Resolve this (or test on a non-Windows env / deploy)
-  before validating gameplay.
-- Supabase CLI is authenticated (token in Windows Credential Manager, target `Supabase CLI:supabase`).
-  `report-match` edge function is in `supabase/functions/` but deploy status unknown.
+## Environment facts
 
-## Unit 6 — pick ONE (brainstorm scope with the user first)
+- `client/.env`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PARTYKIT_HOST=localhost:1999` (local dev only, gitignored).
+- Root `.env`: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` (for `npx partykit dev`, gitignored).
+- Supabase CLI authenticated (token in Windows Credential Manager `Supabase CLI:supabase`).
+- Vercel project: `peytonr7272-gmailcoms-projects/client`, linked at repo root (`.vercel/project.json`).
+- PartyKit authenticated as `peytonr72` (clerk).
+- `npx partykit dev` → http://localhost:1999. `npx partykit deploy` → blocked (see above).
+- Email confirmation is **ON** in Supabase Auth. To test signup: PATCH `mailer_autoconfirm: true` via management API, test, revert to `false`, delete test rows.
 
-1. **Production deployment + live wiring** ← recommended. Deploy client (Vercel — `vercel` plugin +
-   skills available), both PartyKit parties (`main` + `lobby`) to PartyKit Cloud (set the 3 vars),
-   ensure the Supabase project's edge function + JWT auth (non-dev path) are wired, then a real
-   end-to-end smoke test. Also fix/verify the PartyKit Windows-dev crash or move to a CI/cloud test.
-2. **Client polish + reconnect/spectator/replay.** Reconnect indicator, spectator view
-   (`redactFor(null, …)` already supports it), action-log/animations from `GameEvent`s. Replay needs
-   per-hand event persistence which does NOT exist yet (only final standings are stored) → expands scope.
-3. **Burn down deferred minors** (below).
+## Deferred minors (non-blocking polish)
 
-## Deferred minors (non-blocking; fold into whichever unit touches the area)
+- Home rating badge fetched once on mount — doesn't refresh after a match completes.
+- Profile "Back" always returns to Leaderboard tab regardless of entry point.
+- `LobbyScreen` / `Home` ignore Supabase `error` field on profile/rating fetch (silent default 400).
+- `matchReducer`/`lobbyReducer` never clear `error` → stale error banner persists.
+- `ActionBar` raise slider not reset on mask change between streets (re-clamps on send, functionally correct).
+- Missing `favicon.ico` (404, cosmetic).
+- Password field missing `autocomplete` attribute (a11y hint).
 
-- `Home` rating badge is fetched once on mount → shows login-time value, not post-match.
-- `Profile` "Back" always returns to the Leaderboard tab (even when reached via the Profile tab).
-- `LobbyScreen` profile fetch + `Home` rating fetch ignore the Supabase `error` field (graceful-degrade
-  to default 400).
-- `ActionBar` raise slider not reset on mask change between streets (re-clamps on send, so correct).
-- reducers (`matchReducer`/`lobbyReducer`) never clear `error` → stale banner persists.
-- `useProfile` history `.order(referencedTable:"matches")` worked live but is unverified under load.
+## Next options
 
-## Testing with Playwright (required for any UI-touching unit)
-
-Drive the real app with the `playwright` MCP plugin (snapshot > screenshot). Servers:
-`cd client && npm run dev` (→ http://localhost:5173). PartyKit via `npx partykit dev` (currently
-crashes on Windows — see above).
-
-To reach authed screens past the email-confirmation gate **for testing only**: use the Supabase
-Management API with the CLI token (read from Windows Credential Manager target `Supabase CLI:supabase`
-via Win32 `CredRead`), `PATCH /v1/projects/<ref>/config/auth {"mailer_autoconfirm": true}`, sign up,
-test, then **revert to `false`**. Seed/clean test rows via `POST /v1/projects/<ref>/database/query`.
-Always restore the project (delete seeded rows, re-enable email confirmation) when done.
+1. **PartyKit cloud hosting** — upgrade Cloudflare account, run `npx partykit deploy`, update Vercel env. One-command deploy; all secrets already set.
+2. **Client polish + reconnect/spectator** — reconnect indicator, spectator view (`redactFor(null, …)` already supports it), action-log/animations from `GameEvent`s.
+3. **Burn down deferred minors** — small, isolated fixes listed above.
 
 ## Process
 
-`superpowers` skills: `brainstorming` (agree deliverable, write spec to `docs/superpowers/specs/`) →
-`writing-plans` (`docs/superpowers/plans/`) → `subagent-driven-development` (branch off `master`
-first; fresh implementer + spec/quality review per task; broad final review) →
-`finishing-a-development-branch`. Scout TDD / systematic-debugging / verification-before-completion
-each turn. Keep `CLAUDE.md` updated as modules land.
+`superpowers` skills: `brainstorming` → `subagent-driven-development` (branch off `master` first) → `finishing-a-development-branch`. Scout TDD / systematic-debugging / verification-before-completion each turn. Keep `CLAUDE.md` updated as things land.
