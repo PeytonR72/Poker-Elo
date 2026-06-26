@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build --workspace @poker/client",
+  "outputDirectory": "client/dist",
+  "installCommand": "npm install",
+  "framework": null
+}
