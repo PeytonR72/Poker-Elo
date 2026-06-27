@@ -150,8 +150,8 @@ describe("MatchRoom", () => {
 // ---------- Task 3: hello handshake + auth ----------
 
 describe("MatchRoom hello handshake (dev mode)", () => {
-  it("accepts dev token when no JWT secret is configured (env={})", async () => {
-    const room = new MatchRoom(mockParty({}));
+  it("accepts dev token when DEV_TOKENS is true", async () => {
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const conn = mockConn("c1");
     room.onConnect(conn);
 
@@ -180,8 +180,20 @@ describe("MatchRoom hello handshake (dev mode)", () => {
     expect(msgs.some((m) => m.t === "error" && m.message === "auth_failed")).toBe(true);
   });
 
-  it("assigns sequential seat indices to multiple dev-mode players", async () => {
+  it("rejects a dev token when DEV_TOKENS is not set", async () => {
     const room = new MatchRoom(mockParty({}));
+    const conn = mockConn("c_no_dev");
+    room.onConnect(conn);
+
+    await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
+
+    expect(conn._closed).toBe(true);
+    const msgs = conn._msgs.map((m) => JSON.parse(m));
+    expect(msgs.some((m) => m.t === "error" && m.message === "auth_failed")).toBe(true);
+  });
+
+  it("assigns sequential seat indices to multiple dev-mode players", async () => {
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const connA = mockConn("cA");
     const connB = mockConn("cB");
 
@@ -195,6 +207,7 @@ describe("MatchRoom hello handshake (dev mode)", () => {
     expect(room.getPlayer("cB")?.seatIndex).toBe(1);
   });
 });
+
 
 describe("MatchRoom hello handshake (JWT mode)", () => {
   const SECRET = "test-secret";
@@ -253,7 +266,7 @@ describe("MatchRoom hello edge cases", () => {
   });
 
   it("ignores a duplicate hello after already authed", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const conn = mockConn("e2");
     room.onConnect(conn);
 
@@ -267,7 +280,7 @@ describe("MatchRoom hello edge cases", () => {
   });
 
   it("rejects connection when table is full", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
 
     // Fill all TABLE_SIZE seats (triggers startMatch; party.connections is empty so no crash)
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -288,7 +301,7 @@ describe("MatchRoom hello edge cases", () => {
   });
 
   it("closes connection when message is invalid JSON", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const conn = mockConn("e3");
     room.onConnect(conn);
 
@@ -321,7 +334,7 @@ describe("MatchRoom startMatch guards", () => {
     const conn = mockConn("p1");
     const conns: MockPartyConns = makeConns();
     conns.set(conn.id, conn);
-    const room = new MatchRoom(mockParty({}, conns));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }, conns));
 
     room.onConnect(conn);
     await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
@@ -364,7 +377,7 @@ describe("csprngSeed", () => {
 
 describe("MatchRoom startMatch (dev mode)", () => {
   it("sets tableState to non-null after startMatch message", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
 
     // Seat one player
     const conn = mockConn("p1");
@@ -378,7 +391,7 @@ describe("MatchRoom startMatch (dev mode)", () => {
   });
 
   it("tableState is at preflop with empty board after startMatch", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const conn = mockConn("p1");
     room.onConnect(conn);
     await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
@@ -390,7 +403,7 @@ describe("MatchRoom startMatch (dev mode)", () => {
   });
 
   it("all TABLE_SIZE seats have 2 hole cards after startMatch", async () => {
-    const room = new MatchRoom(mockParty({}));
+    const room = new MatchRoom(mockParty({ DEV_TOKENS: "true" }));
     const conn = mockConn("p1");
     room.onConnect(conn);
     await room.onMessage(encode({ t: "hello", jwt: "dev:alice" }), conn);
@@ -425,7 +438,7 @@ describe("MatchRoom startMatch (dev mode)", () => {
 describe("MatchRoom auto-start on full table", () => {
   it("starts match automatically when TABLE_SIZE players connect and auth", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -445,7 +458,7 @@ describe("MatchRoom auto-start on full table", () => {
 describe("MatchRoom broadcastSnapshots", () => {
   it("each authed connection receives a snapshot message after match starts", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -464,7 +477,7 @@ describe("MatchRoom broadcastSnapshots", () => {
 
   it("snapshot view does not contain deck or opponent holeCards", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -502,7 +515,7 @@ describe("MatchRoom broadcastSnapshots", () => {
     const conn = mockConn("p1");
     const conns: MockPartyConns = makeConns();
     conns.set(conn.id, conn);
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     room.onConnect(conn);
@@ -519,7 +532,7 @@ describe("MatchRoom broadcastSnapshots", () => {
 describe("MatchRoom dealPrivate (Task 5)", () => {
   it("each human connection receives exactly one dealPrivate message after startMatch", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -540,7 +553,7 @@ describe("MatchRoom dealPrivate (Task 5)", () => {
 
   it("dealPrivate hole cards match tableState.seats[seatIndex].holeCards for that player", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -574,7 +587,7 @@ describe("MatchRoom dealPrivate (Task 5)", () => {
     const conn = mockConn("p1");
     const conns: MockPartyConns = makeConns();
     conns.set(conn.id, conn);
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     room.onConnect(conn);
@@ -589,7 +602,7 @@ describe("MatchRoom dealPrivate (Task 5)", () => {
 
   it("snapshot sent to player A does NOT contain player B's hole cards", async () => {
     const conns: MockPartyConns = makeConns();
-    const party = mockParty({}, conns);
+    const party = mockParty({ DEV_TOKENS: "true" }, conns);
     const room = new MatchRoom(party);
 
     for (let i = 0; i < TABLE_SIZE; i++) {
@@ -635,7 +648,7 @@ async function setupFullMatch(): Promise<{
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env: { DEV_TOKENS: "true" },
   } as unknown as Party.Party;
   const room = new MatchRoom(party);
 
@@ -846,7 +859,7 @@ describe("MatchRoom turn timer (Task 7)", () => {
       connections: conns,
       getConnections: () => conns,
       broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-      env: {},
+      env: { DEV_TOKENS: "true" },
     } as unknown as Party.Party;
     const room = new MatchRoom(party);
 
@@ -1229,7 +1242,7 @@ async function setupAndCompleteHand(): Promise<{
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env: { DEV_TOKENS: "true" },
   } as unknown as Party.Party;
   const room = new MatchRoom(party);
 
@@ -1296,7 +1309,7 @@ describe("MatchRoom onHandComplete (Task 8)", () => {
       connections: conns,
       getConnections: () => conns,
       broadcast: () => {},
-      env: {},
+      env: { DEV_TOKENS: "true" },
     } as unknown as Party.Party;
     const room = new MatchRoom(party);
 
@@ -1658,7 +1671,7 @@ async function setupSinglePlayerRoom(): Promise<{
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env: { DEV_TOKENS: "true" },
   } as unknown as Party.Party;
   const room = new MatchRoom(party);
 
@@ -1761,7 +1774,7 @@ describe("Task 11: disconnect/reconnect grace", () => {
       connections: conns,
       getConnections: () => conns,
       broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-      env: {},
+      env: { DEV_TOKENS: "true" },
     } as unknown as Party.Party;
     const room = new MatchRoom(party);
 
@@ -1829,7 +1842,7 @@ describe("Task 11: disconnect/reconnect grace", () => {
       connections: conns,
       getConnections: () => conns,
       broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-      env: {},
+      env: { DEV_TOKENS: "true" },
     } as unknown as Party.Party;
     const room = new MatchRoom(party);
 
@@ -1901,7 +1914,7 @@ async function setupBotMatch(): Promise<{
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env: { DEV_TOKENS: "true" },
   } as unknown as Party.Party;
   const room = new MatchRoom(party);
 
@@ -1930,7 +1943,7 @@ async function setupAllBotMatch(): Promise<{
     connections: conns,
     getConnections: () => conns,
     broadcast: (msg: string) => { broadcastMsgs.push(msg); },
-    env: {},
+    env: { DEV_TOKENS: "true" },
   } as unknown as Party.Party;
   const room = new MatchRoom(party);
 
@@ -2100,7 +2113,7 @@ describe("Task 13: integration smoke test", () => {
       connections: conns,
       getConnections: () => conns,
       broadcast: (m: string) => broadcastMsgs.push(m),
-      env: {} as Record<string, unknown>,
+      env: { DEV_TOKENS: "true" } as Record<string, unknown>,
     } as unknown as Party.Party;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2212,7 +2225,7 @@ describe("MatchRoom provisioning + matchInfo", () => {
     const conns = new Map<string, { id: string; sent: string[]; send(m: string): void; close(): void }>();
     const party = {
       id: "room-1",
-      env,
+      env: { DEV_TOKENS: "true", ...env },
       getConnections: () => conns.values(),
       broadcast: (m: string) => { broadcasts.push(m); },
     } as unknown as Party.Party;

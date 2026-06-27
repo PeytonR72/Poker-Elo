@@ -94,10 +94,11 @@ export default class Lobby implements Party.Server {
   private async authenticate(jwt: string | undefined): Promise<string | null> {
     if (typeof jwt !== "string") return null;
     const secret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
+    const devTokensEnabled = this.party.env["DEV_TOKENS"] === "true";
     try {
       // Always try parseDevToken first if token starts with "dev:"
       if (jwt.startsWith("dev:")) {
-        if (process.env.DEV_TOKENS === "true") {
+        if (devTokensEnabled) {
           const dev = parseDevToken(jwt);
           return dev ? dev.sub : null;
         }

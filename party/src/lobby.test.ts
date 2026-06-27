@@ -20,7 +20,7 @@ function makeLobby(provisioned: Array<{ roomId: string; body: unknown }>): {
   const conns = new Map<string, FakeConn>();
   const party = {
     id: "lobby",
-    env: {}, // dev mode (no SUPABASE_JWT_SECRET)
+    env: { DEV_TOKENS: "true" }, // dev mode (no SUPABASE_JWT_SECRET, but DEV_TOKENS enabled)
     getConnections: () => conns.values(),
     broadcast: () => {},
     context: {
@@ -68,7 +68,7 @@ describe("Lobby party", () => {
     const conns = new Map<string, FakeConn>();
     const party = {
       id: "lobby",
-      env: {},
+      env: { DEV_TOKENS: "true" },
       getConnections: () => conns.values(),
       broadcast: () => {},
       context: {
@@ -101,7 +101,7 @@ describe("Lobby party", () => {
     const conns = new Map<string, FakeConn>();
     const party = {
       id: "lobby",
-      env: {},
+      env: { DEV_TOKENS: "true" },
       getConnections: () => conns.values(),
       broadcast: () => {},
       context: {

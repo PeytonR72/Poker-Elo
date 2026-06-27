@@ -270,11 +270,12 @@ export default class MatchRoom implements Party.Server {
 
     // Auth
     const jwtSecret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
+    const devTokensEnabled = this.party.env["DEV_TOKENS"] === "true";
     let playerId: string;
     try {
       // Always try parseDevToken first if token starts with "dev:"
       if (jwt.startsWith("dev:")) {
-        if (process.env.DEV_TOKENS === "true") {
+        if (devTokensEnabled) {
           const dev = parseDevToken(jwt);
           if (!dev) throw new Error("Invalid dev token");
           playerId = dev.sub;
