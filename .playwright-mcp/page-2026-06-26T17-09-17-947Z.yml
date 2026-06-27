@@ -1,9 +1,0 @@
-- generic [ref=e3]:
-  - heading "PokerElo" [level=1] [ref=e4]
-  - generic [ref=e5]:
-    - textbox "username" [ref=e10]: inv@lid
-    - textbox "email" [ref=e6]: testuser_e2e@example.com
-    - textbox "password" [ref=e7]: password123
-    - button "Create account" [active] [ref=e11] [cursor=pointer]
-  - paragraph [ref=e13]: Username must be 3–20 letters, numbers or underscores.
-  - button "Have an account? Sign in" [ref=e12] [cursor=pointer]

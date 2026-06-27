@@ -1,8 +1,0 @@
-- generic [ref=e3]:
-  - heading "PokerElo" [level=1] [ref=e4]
-  - generic [ref=e5]:
-    - textbox "username" [ref=e10]
-    - textbox "email" [ref=e6]
-    - textbox "password" [ref=e7]
-    - button "Create account" [ref=e11] [cursor=pointer]
-  - button "Have an account? Sign in" [active] [ref=e12] [cursor=pointer]

@@ -9,3 +9,8 @@ dist/
 *.tsbuildinfo
 
 .vercel
+
+# Local dev runtime artifacts
+.partykit/
+.playwright-mcp/
+.superpowers/
