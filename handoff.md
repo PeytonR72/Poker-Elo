@@ -26,21 +26,14 @@ All gates green: `npm test` (231), `npm run typecheck`, `npm run lint`, `npm run
 - `npx partykit dev` → http://localhost:1999. `npx partykit deploy` → blocked (see above).
 - Email confirmation is **ON** in Supabase Auth. To test signup: PATCH `mailer_autoconfirm: true` via management API, test, revert to `false`, delete test rows.
 
-## Known bugs (visible right now, fix first)
+## Known bugs
 
-1. **`auth_failed` on Play tab (local AND prod)** — `party/src/lobby.ts` and `party/src/matchRoom.ts` both have an `authenticate` method that only tries `parseDevToken` when `SUPABASE_JWT_SECRET` is empty. Now that the root `.env` has a real secret, `partykit dev` loads it and routes all tokens through `verifyJwt`, which rejects `dev:<id>` strings → `auth_failed`. Fix: rewrite `authenticate` in both files to always try `parseDevToken` first, then fall back to `verifyJwt` only for non-dev tokens. Add an explicit `DEV_TOKENS=true` guard in the root `.env` (not set in cloud secrets) so production can't be spoofed. Workaround until fixed: set `SUPABASE_JWT_SECRET=` (empty) in root `.env` and restart `npx partykit dev`.
+None outstanding. Unit 7 fixed all known bugs.
 
-2. **Profile tab crashes with "Cannot coerce the result to a single JSON object"** — `useProfile` fetches the profile row with an embedded join to match history and calls `.single()`. When the user has match rows, PostgREST returns one row per match, `.single()` receives multiple rows and throws. Fix: split into two queries — `.single()` for the profile row alone, separate `.select()` (returning array) for match history.
+## Deferred minors
 
-## Deferred minors (non-blocking polish)
-
-- Home rating badge fetched once on mount — doesn't refresh after a match completes.
-- Profile "Back" always returns to Leaderboard tab regardless of entry point.
-- `LobbyScreen` / `Home` ignore Supabase `error` field on profile/rating fetch (silent default 400).
-- `matchReducer`/`lobbyReducer` never clear `error` → stale error banner persists.
-- `ActionBar` raise slider not reset on mask change between streets (re-clamps on send, functionally correct).
-- Missing `favicon.ico` (404, cosmetic).
-- Password field missing `autocomplete` attribute (a11y hint).
+All previously listed minors resolved in Unit 7. One remaining item:
+- Favicon is an SVG placeholder (`client/public/favicon.svg`). Drop the real PNG as `client/public/favicon.png` and update the `<link>` in `client/index.html` to `type="image/png" href="/favicon.png"`.
 
 ## Next options
 

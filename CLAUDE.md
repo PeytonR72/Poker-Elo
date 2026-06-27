@@ -170,8 +170,13 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 - **Unit 6** — Production deployment: client live on Vercel, `report-match` edge function deployed,
   PartyKit Windows dev crash fixed (patch-package). PartyKit cloud hosting deferred (platform limit);
   gameplay requires local `npx partykit dev` until a hosting solution is chosen.
+- **Unit 7** — Bug fixes + polish: `auth_failed` fixed (dev tokens always tried first, gated on
+  `party.env["DEV_TOKENS"] === "true"`); rating badge refreshes on return from match; Profile Back
+  button restores originating tab; Supabase fetch errors surfaced inline; stale error banners cleared
+  on next message in `matchReducer`/`lobbyReducer`; raise slider resets on new hand/street;
+  SVG favicon wired; password `autoComplete` attribute added. All 234 tests green.
 
-**Not yet done / next:** PartyKit cloud hosting (Cloudflare Workers Paid or Fly.io).
+**Not yet done / next:** PartyKit cloud hosting (Cloudflare Workers Paid or Fly.io). Also: drop `favicon.svg` placeholder for the real spade PNG (`client/public/favicon.png`) and update `index.html` link.
 
 ## Working practice
 
