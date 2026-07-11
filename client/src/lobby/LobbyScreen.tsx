@@ -13,8 +13,9 @@ export default function LobbyScreen({
   rating: number;
   onMatchFound: (roomId: string, format: string) => void;
 }) {
-  const { state, enqueue, leave } = useLobbySocket(auth.getJwt);
+  const { state, connStatus, enqueue, leave } = useLobbySocket(auth.getJwt);
   const [format, setFormat] = useState<string>(DEFAULT_FORMAT);
+  const connected = connStatus === "open";
 
   useEffect(() => {
     if (state.status === "matched" && state.match) {
@@ -34,10 +35,19 @@ export default function LobbyScreen({
               ))}
             </select>
           </label>
-          <button onClick={() => enqueue(rating, format)}
-            style={{ padding: "10px 20px", background: "#2d7d46", color: "white", border: 0, borderRadius: 6 }}>
+          <button onClick={() => enqueue(rating, format)} disabled={!connected}
+            style={{ padding: "10px 20px", background: connected ? "#2d7d46" : "#3a3f4a",
+              color: "white", border: 0, borderRadius: 6, cursor: connected ? "pointer" : "not-allowed" }}>
             Find Match
           </button>
+          {connStatus === "connecting" && (
+            <p style={{ color: "#8b92a5" }}>Connecting to game server…</p>
+          )}
+          {connStatus === "closed" && (
+            <p style={{ color: "#ff6b6b" }}>
+              Can't reach the game server — matchmaking is unavailable. Retrying…
+            </p>
+          )}
         </>
       ) : (
         <div>

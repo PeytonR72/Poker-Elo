@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ELO_DEFAULT_RATING } from "@poker/shared";
 import { supabase } from "../lib/supabase.js";
 import type { ProfileRow } from "../data/leaderboard.js";
 import type { MatchResultRow } from "../data/profile.js";
@@ -22,16 +23,20 @@ export function useProfile(playerId: string | null): ProfileFetch {
     }
     let cancelled = false;
     async function load() {
-      const { data: prof, error: profErr } = await supabase
+      const { data: profRow, error: profErr } = await supabase
         .from("profiles")
         .select("id, username, rating, games_played")
         .eq("id", playerId)
-        .single();
+        .maybeSingle();
       if (cancelled) return;
       if (profErr) {
         setState({ loading: false, error: profErr.message, profile: null, results: [] });
         return;
       }
+      // No row yet (account predates profile provisioning) → fresh-player defaults.
+      const prof: ProfileRow = (profRow as ProfileRow | null) ?? {
+        id: playerId!, username: null, rating: ELO_DEFAULT_RATING, games_played: 0,
+      };
 
       const { data: res, error: resErr } = await supabase
         .from("match_results")
@@ -40,13 +45,13 @@ export function useProfile(playerId: string | null): ProfileFetch {
         .order("ended_at", { ascending: false, referencedTable: "matches" });
       if (cancelled) return;
       if (resErr) {
-        setState({ loading: false, error: resErr.message, profile: prof as ProfileRow, results: [] });
+        setState({ loading: false, error: resErr.message, profile: prof, results: [] });
         return;
       }
       setState({
         loading: false,
         error: null,
-        profile: prof as ProfileRow,
+        profile: prof,
         results: (res ?? []) as unknown as MatchResultRow[],
       });
     }

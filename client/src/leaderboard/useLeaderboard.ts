@@ -37,7 +37,7 @@ export function useLeaderboard(ownId: string | null): LeaderboardData {
       let ownPosition: number | null = null;
       if (ownId && !rows.some((r) => r.id === ownId)) {
         const { data: own } = await supabase
-          .from("profiles").select(PROFILE_COLS).eq("id", ownId).single();
+          .from("profiles").select(PROFILE_COLS).eq("id", ownId).maybeSingle();
         const o = own as ProfileRow | null;
         if (o && o.games_played > 0) {
           ownRow = o;

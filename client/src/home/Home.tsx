@@ -33,13 +33,14 @@ export default function Home({
         .from("profiles")
         .select("rating")
         .eq("id", auth.userId)
-        .single()
+        .maybeSingle()
         .then(({ data, error }) => {
           if (error) {
             setRatingError(error.message);
           } else {
+            // No row yet (account predates profile provisioning) → default rating.
             setRatingError(null);
-            if (data && typeof data.rating === "number") setRating(data.rating);
+            setRating(data && typeof data.rating === "number" ? data.rating : ELO_DEFAULT_RATING);
           }
         });
     }, 300);
