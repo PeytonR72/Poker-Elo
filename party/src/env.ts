@@ -3,6 +3,7 @@ import type MatchRoom from "./matchRoom.js";
 import type Lobby from "./lobby.js";
 
 export interface Env {
+  [key: string]: unknown;
   MAIN: DurableObjectNamespace<MatchRoom>;
   LOBBY: DurableObjectNamespace<Lobby>;
   SUPABASE_URL?: string;
