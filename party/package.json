@@ -10,6 +10,7 @@
     "partyserver": "^0.0.66"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   }
