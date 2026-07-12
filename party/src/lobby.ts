@@ -138,7 +138,17 @@ export default class Lobby extends Server<Env> {
       const roomId = makeRoomCode(MATCH_CODE_LENGTH, Math.random);
       let res: Response;
       try {
-        const stub = await getServerByName(this.env.MAIN, roomId);
+        // getServerByName's return type structurally requires every RPC-typed member of
+        // Server<MatchRoom> (onRequest's Response, getConnection's WebSocket Stub, etc.) to
+        // match @cloudflare/workers-types' ambient-global vs. explicitly-imported forms
+        // exactly — a package-internal type-design split that collides across the whole
+        // Server surface, not one property. MatchRoom does satisfy Server<Env> at runtime
+        // (Task 1 proved a real wrangler deploy works); this is a type-level-only mismatch.
+        // We only ever call `.fetch()` on the returned stub, so narrow to that alone rather
+        // than fighting the full generic surface.
+        const stub = (await getServerByName(this.env.MAIN as never, roomId)) as unknown as {
+          fetch: typeof fetch;
+        };
         res = await stub.fetch("https://internal/provision", {
           method: "POST",
           body: JSON.stringify({ format: match.format, humanIds: match.humanIds }),
