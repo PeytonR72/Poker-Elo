@@ -61,17 +61,24 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
 | File | Exports / Role |
 |---|---|
-| `matchRoom.ts` | `MatchRoom` — PartyKit `Party.Server` (the `main` party); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds }`), roster-aware start + bot-fill, `matchInfo` broadcast |
-| `lobby.ts` | `Lobby` — PartyKit `Party.Server` (the `lobby` party); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `this.party.context.parties.main.get(roomId).fetch(...)`, sends `queueStatus`/`matchFound` |
+| `matchRoom.ts` | `MatchRoom` — `partyserver` `Server<Env>` Durable Object (the `MAIN` binding); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds }`), roster-aware start + bot-fill, `matchInfo` broadcast |
+| `lobby.ts` | `Lobby` — `partyserver` `Server<Env>` Durable Object (the `LOBBY` binding); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `getServerByName(this.env.MAIN, roomId)`, sends `queueStatus`/`matchFound` |
 | `matchmaker.ts` | `formMatches(waiters, now, onlineCount)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch` |
-| `auth.ts` | `verifyJwt(token, secret)`, `parseDevToken("dev:<id>")` |
+| `auth.ts` | `verifyJwt(token, { secret?, supabaseUrl? })` — dispatches on the JWT's own `alg` header: `HS256` verifies against `secret` (legacy Supabase projects), anything else (e.g. `ES256`) verifies against `${supabaseUrl}/auth/v1/.well-known/jwks.json`. `parseDevToken("dev:<id>")` |
+| `env.ts` | `Env` — typed Durable Object bindings (`MAIN`, `LOBBY`) + secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_TOKENS`) |
+| `worker.ts` | The Worker `fetch` entrypoint — delegates to `partyserver`'s `routePartykitRequest`; exports `MatchRoom`/`Lobby` as the deployed Durable Object classes |
 | `timers.ts` | `TurnTimer` — `start(ms, cb)` (auto-cancels previous), `cancel()` |
 | `botRunner.ts` | `decideBotAction(view, holeCards, mask, rng)`, `botThinkDelayMs(rng, min, max)` |
 
-Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lobby` = `lobby.ts`).
+Durable Object bindings are declared in `wrangler.jsonc` (`MAIN` → `MatchRoom`, `LOBBY` → `Lobby`),
+with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone from this repo —
+`party/` is deployed with `wrangler`, not the `partykit` CLI (see
+`docs/deploy-partyserver-cloudflare.md`).
 
 **Key conventions for `party/`:**
-- `party.getConnections()` is an **iterable**, not a Map — iterate it; no `.get()`.
+- `this.getConnections()`/`this.broadcast()`/`this.env`/`this.name` are inherited from
+  `partyserver`'s `Server<Env>` base class (no more `party.getConnections()`/`party.env`/`party.id`
+  wrapper object — that was the old PartyKit `Party.Party` shape).
 - `timebankUsed` is broadcast BEFORE `yourTurn` so the client can update the clock first.
 - `pairwiseElo` deltas are applied independently per player (not assumed zero-sum).
 - CSPRNG seed: `crypto.getRandomValues(new Uint32Array(4))` XOR-folded to 32-bit.
@@ -79,6 +86,16 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
   (`DISCONNECT_GRACE_MS`) bot-fills missing humans but does **not** start an all-bot match (zero
   humans seated → room stays idle). `makeRoomCode` uses `Math.random` (room codes are not
   deck-secret; rooms enforce the roster).
+- **No automated tests for `matchRoom.ts`/`lobby.ts`.** `partyserver`'s `Server` class imports
+  Cloudflare's `cloudflare:workers` built-in at module load time, which crashes under plain
+  Node/Vitest regardless of mocking strategy (confirmed across multiple investigation attempts,
+  including Cloudflare's own official `@cloudflare/vitest-pool-workers`, which crashes internally
+  and unfixably in this environment). Verification for these two files is: `npm run typecheck` +
+  careful diff review for any change, plus a manual/scripted `wrangler dev` integration check
+  (see `docs/deploy-partyserver-cloudflare.md` and the partyserver-migration plan under
+  `docs/superpowers/plans/` for the pattern) before any deploy. `auth.ts`/`matchmaker.ts`/
+  `timers.ts`/`botRunner.ts` have no PartyKit/partyserver dependency and keep normal Vitest
+  coverage.
 
 ## `client/src` module map
 
@@ -148,15 +165,14 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
 
 ## Deployment
 
-- **Client**: https://client-coral-eight-91.vercel.app (Vercel, production). Build: `npm run build --workspace @poker/client` from repo root; output `client/dist`. Env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PARTYKIT_HOST`) set in Vercel project `peytonr7272-gmailcoms-projects/client`.
+- **Client**: https://poker-elo.vercel.app (Vercel, production). Build: `npm run build --workspace @poker/client` from repo root; output `client/dist`. Env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PARTYKIT_HOST`) set in Vercel project `peytonr7272-gmailcoms-projects/client`.
 - **Supabase**: live project `wydnwnitnexifndwdsmg` (us-west-2). Both migrations applied. `report-match` edge function deployed and ACTIVE.
-- **PartyKit**: NOT deployed to cloud (partykit.dev platform hit Cloudflare's 10k domain limit). Run `npx partykit dev` locally (port 1999) for gameplay. Future hosting options: Cloudflare Workers Paid ($5/mo via `partykit deploy`) or Fly.io free tier (run partykit dev in a container). When deployed, update `VITE_PARTYKIT_HOST` in Vercel env and redeploy.
-- **PartyKit cloud secrets**: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` already set via `npx partykit env add` (stored encrypted in PartyKit Cloud, ready for when deploy becomes possible).
-- **Windows dev**: `npx partykit dev` and `npx partykit deploy` work on Windows (patch applied via `patch-package`; `postinstall` re-applies after `npm install`).
+- **`party/` (game server)**: live cloud-prem at `party.pokerelo.us`, deployed via `wrangler` (Cloudflare's own CLI) to the user's own Cloudflare account — `partykit`/`partykit.json` are gone from this repo entirely. Runs on the Workers **Free** plan (SQLite-backed Durable Objects via an explicit `new_sqlite_classes` migration in `party/wrangler.jsonc` — the `partykit` CLI could not generate this migration type for cloud-prem deploys, which is why this repo moved off it; see `docs/deploy-partyserver-cloudflare.md`). Secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are set via `wrangler secret put`; `DEV_TOKENS` is intentionally never set in production (its absence is what makes `dev:<id>` tokens rejected — verify with the smoke test in the runbook after every deploy). `VITE_PARTYKIT_HOST` on Vercel points at `party.pokerelo.us`.
+- **Local dev**: `npm run dev` inside `party/` (now `wrangler dev`, not `npx partykit dev`) — needs a local `party/.dev.vars` with `DEV_TOKENS=true` (git-ignored).
 
 ## Status
 
-**Build Units 1–6 are complete:**
+**Build Units 1–8 are complete:**
 - **Unit 1** — scaffold + pure engine (`shared/`).
 - **Unit 2** — PartyKit `MatchRoom`: server-authoritative deal, action loop, turn timer/timebank,
   match clock/blinds/bust/end, ELO deltas, disconnect grace, bot runner.
@@ -175,8 +191,23 @@ Parties are registered in `partykit.json` (`main` = `matchRoom.ts`, `parties.lob
   button restores originating tab; Supabase fetch errors surfaced inline; stale error banners cleared
   on next message in `matchReducer`/`lobbyReducer`; raise slider resets on new hand/street;
   SVG favicon wired; password `autoComplete` attribute added. All 234 tests green.
+- **Unit 8** — `party/` migrated from the `partykit` CLI/platform to Cloudflare's `partyserver` +
+  `wrangler`, deployed cloud-prem to `party.pokerelo.us` on the Workers **Free** plan. `MatchRoom`/
+  `Lobby` converted to `partyserver` `Server<Env>` Durable Object subclasses (mechanical shell
+  conversion — business logic unchanged); `matchRoom.test.ts`/`lobby.test.ts` (98 tests) removed —
+  `partyserver`'s `Server` class cannot be loaded under plain Node/Vitest by design (confirmed via
+  extensive investigation, see `docs/superpowers/plans/2026-07-11-partyserver-migration.md`'s
+  Revision Notes), so these are now verified via `wrangler dev` integration checks instead of
+  automated unit tests. Also fixed a real, previously-latent bug surfaced by this deploy:
+  `party/src/auth.ts`'s `verifyJwt` only supported the legacy shared-secret `HS256` scheme; this
+  Supabase project signs JWTs with asymmetric `ES256` keys, verified via JWKS — `verifyJwt` now
+  dispatches on the token's own `alg` header to support both. Root `npm test` is now 138 tests
+  (234 − 98 deleted + 2 new `auth.test.ts` cases for the JWKS dispatch logic).
 
-**Not yet done / next:** PartyKit cloud hosting (Cloudflare Workers Paid or Fly.io). Also: drop `favicon.svg` placeholder for the real spade PNG (`client/public/favicon.png`) and update `index.html` link.
+**Not yet done / next:** drop `favicon.svg` placeholder for the real spade PNG
+(`client/public/favicon.png`) and update `index.html` link. Consider adding an offline/local
+`createLocalJWKSet`-based test for `verifyJwt`'s successful ES256 verification path (currently
+verified only manually against live production traffic, not by an automated test — see Unit 8).
 
 ## Working practice
 
