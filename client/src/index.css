@@ -8,3 +8,8 @@ body {
 }
 button { font: inherit; cursor: pointer; }
 input { font: inherit; }
+
+@keyframes seatActionPop {
+  from { transform: translateX(-50%) scale(1.4); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
+}

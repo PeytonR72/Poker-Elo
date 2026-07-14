@@ -41,6 +41,7 @@ export default function Table({ state }: { state: MatchUiState }) {
               isOwn={i === state.ownSeat}
               isToAct={view.toAct === i}
               ownHole={state.ownHole}
+              lastAction={state.actionBySeat[i]}
             />
           </div>
         );

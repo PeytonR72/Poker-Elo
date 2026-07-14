@@ -10,6 +10,7 @@ export interface MatchUiState {
   result: { finishPlaceById: Record<string, number>; eloDeltas: Record<string, number> } | null;
   error: string | null;
   lastEvent: GameEvent | null;
+  actionBySeat: Record<number, { action: string; amount: number } | undefined>;
 }
 
 export const initialMatchState: MatchUiState = {
@@ -22,6 +23,7 @@ export const initialMatchState: MatchUiState = {
   result: null,
   error: null,
   lastEvent: null,
+  actionBySeat: {},
 };
 
 export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState {
@@ -50,8 +52,21 @@ export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState 
       return { ...state, turn: { mask: msg.mask, deadlineTs: msg.deadlineTs }, error: null };
     case "timebankUsed":
       return state.ownSeat === msg.seatIdx ? { ...state, timebankMs: msg.remainingMs, error: null } : state;
-    case "event":
-      return { ...state, lastEvent: msg.event, error: null };
+    case "event": {
+      const event = msg.event;
+      if (event.type === "action") {
+        return {
+          ...state,
+          lastEvent: event,
+          actionBySeat: { ...state.actionBySeat, [event.seat]: { action: event.action, amount: event.amount } },
+          error: null,
+        };
+      }
+      if (event.type === "street" || event.type === "handComplete") {
+        return { ...state, lastEvent: event, actionBySeat: {}, error: null };
+      }
+      return { ...state, lastEvent: event, error: null };
+    }
     case "matchOver":
       return {
         ...state,
