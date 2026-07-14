@@ -28,15 +28,33 @@ export default function Table({ state }: { state: MatchUiState }) {
     if (state.handCompleteSeq === lastHandleSeq.current) return;
     lastHandleSeq.current = state.handCompleteSeq;
     setGlowSeats(state.winners);
+    // This timer is a fallback cap only — the real clear signal is the next hand
+    // actually starting (below), since the server's inter-hand pause clock and this
+    // client's display pacing aren't the same clock and can drift.
     const duration = state.showdownThisHand ? WINNER_GLOW_MS_SHOWDOWN : WINNER_GLOW_MS;
     const timer = setTimeout(() => setGlowSeats([]), duration);
     return () => clearTimeout(timer);
   }, [state.handCompleteSeq, state.winners, state.showdownThisHand]);
 
+  // Authoritative clear: the moment the server confirms a new hand has actually dealt,
+  // drop any lingering winner glow from the previous one immediately.
+  const lastHandNumber = useRef<number | null>(null);
+  useEffect(() => {
+    const hn = view?.handNumber ?? null;
+    if (hn === null) return;
+    if (lastHandNumber.current !== null && hn !== lastHandNumber.current) {
+      setGlowSeats([]);
+    }
+    lastHandNumber.current = hn;
+  }, [view?.handNumber]);
+
   if (!view) return <p style={{ textAlign: "center" }}>Waiting for the table…</p>;
   const n = view.seats.length;
   const own = state.ownSeat ?? 0;
-  const pot = view.pots.reduce((sum, p) => sum + p.amount, 0);
+  // view.pots is only ever populated transiently inside settleShowdown/awardSingleWinner
+  // (reset to [] immediately after distributing chips), so every snapshot we actually
+  // receive has pots === []. The live pot during a hand is each seat's total contribution.
+  const pot = view.seats.reduce((sum, s) => sum + (s?.committedTotal ?? 0), 0);
 
   return (
     <div style={{ position: "relative", width: "min(900px, 95vw)", height: 520, margin: "0 auto" }}>

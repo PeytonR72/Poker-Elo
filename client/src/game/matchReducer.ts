@@ -11,9 +11,15 @@ export interface MatchUiState {
   error: string | null;
   lastEvent: GameEvent | null;
   actionBySeat: Record<number, { action: string; amount: number } | undefined>;
+  /** Snapshot of the seats awarded a pot in the most recently *completed* hand. */
   winners: number[];
+  /** Whether that most recently completed hand went to showdown. */
   showdownThisHand: boolean;
   handCompleteSeq: number;
+  /** In-progress accumulators for the hand currently being played; baked into
+   *  `winners`/`showdownThisHand` and reset the instant `handComplete` arrives. */
+  pendingWinners: number[];
+  pendingShowdown: boolean;
 }
 
 export const initialMatchState: MatchUiState = {
@@ -30,6 +36,8 @@ export const initialMatchState: MatchUiState = {
   winners: [],
   showdownThisHand: false,
   handCompleteSeq: 0,
+  pendingWinners: [],
+  pendingShowdown: false,
 };
 
 export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState {
@@ -71,26 +79,30 @@ export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState 
       if (event.type === "street") {
         return { ...state, lastEvent: event, actionBySeat: {}, error: null };
       }
-      if (event.type === "blind") {
-        // First blind(s) posted mean a fresh hand — clear the previous hand's winner glow.
-        return { ...state, lastEvent: event, winners: [], showdownThisHand: false, error: null };
-      }
       if (event.type === "showdown") {
-        return { ...state, lastEvent: event, showdownThisHand: true, error: null };
+        return { ...state, lastEvent: event, pendingShowdown: true, error: null };
       }
       if (event.type === "award") {
         return {
           ...state,
           lastEvent: event,
-          winners: state.winners.includes(event.seat) ? state.winners : [...state.winners, event.seat],
+          pendingWinners: state.pendingWinners.includes(event.seat)
+            ? state.pendingWinners
+            : [...state.pendingWinners, event.seat],
           error: null,
         };
       }
       if (event.type === "handComplete") {
+        // Bake this hand's accumulated winners/showdown into the stable fields Table.tsx
+        // reads for the glow effect, then reset the accumulators for the next hand.
         return {
           ...state,
           lastEvent: event,
           actionBySeat: {},
+          winners: state.pendingWinners,
+          showdownThisHand: state.pendingShowdown,
+          pendingWinners: [],
+          pendingShowdown: false,
           handCompleteSeq: state.handCompleteSeq + 1,
           error: null,
         };
