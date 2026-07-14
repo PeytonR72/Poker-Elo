@@ -17,6 +17,8 @@ import {
   applyAction,
   TIMEBANK_INITIAL_MS,
   TIMEBANK_REPLENISH_MS,
+  HUMAN_TURN_TIME_MS,
+  HUMAN_TURN_TIME_RIVER_MS,
   DISCONNECT_GRACE_MS,
   pairwiseElo,
   ELO_DEFAULT_RATING,
@@ -34,6 +36,9 @@ import type { Env } from "./env.js";
 
 /** UX pause between hands — not a poker-numeric rule, so defined locally. */
 const INTER_HAND_PAUSE_MS = 3_000;
+// Hold the completed board on screen longer after a showdown (multiple hands shown down
+// simultaneously reads better with more time than a routine everyone-folded pause).
+const SHOWDOWN_PAUSE_MS = 6_000;
 
 /** Advance button index past any busted seats, returning the next valid seat index. */
 function nextNonBustedSeat(seats: (Seat | null)[], currentButton: number): number {
@@ -243,7 +248,7 @@ export default class MatchRoom extends Server<Env> {
 
       // Continue or end hand
       if (this.tableState.street === "complete") {
-        this.onHandComplete();
+        this.onHandComplete(events.some((e) => e.type === "showdown"));
       } else {
         this.sendYourTurn();
       }
@@ -494,7 +499,9 @@ export default class MatchRoom extends Server<Env> {
       return; // DO NOT start the turn timer for bots
     }
 
-    const deadlineTs = Date.now() + format.turnTimeMs;
+    // Human turn clock is fixed (not format-dependent), with extra time on the river.
+    const turnMs = this.tableState.street === "river" ? HUMAN_TURN_TIME_RIVER_MS : HUMAN_TURN_TIME_MS;
+    const deadlineTs = Date.now() + turnMs;
     const mask = legalActions(this.tableState, seatIdx);
 
     // Find the connection for this seat and send yourTurn
@@ -507,7 +514,7 @@ export default class MatchRoom extends Server<Env> {
 
     // Start the turn timer
     this.timebankUsedThisTurn = false;
-    this.turnTimer.start(format.turnTimeMs, () => this.onTurnExpired(seatIdx));
+    this.turnTimer.start(turnMs, () => this.onTurnExpired(seatIdx));
   }
 
   /** Execute an action on behalf of a bot seat. */
@@ -525,7 +532,7 @@ export default class MatchRoom extends Server<Env> {
     for (const event of events) this.broadcast(encode({ t: "event", event }));
     this.broadcastSnapshots();
     if (this.tableState.street === "complete") {
-      this.onHandComplete();
+      this.onHandComplete(events.some((e) => e.type === "showdown"));
     } else {
       this.sendYourTurn();
     }
@@ -568,7 +575,7 @@ export default class MatchRoom extends Server<Env> {
     this.broadcastSnapshots();
 
     if (this.tableState.street === "complete") {
-      this.onHandComplete();
+      this.onHandComplete(events.some((e) => e.type === "showdown"));
     } else {
       this.sendYourTurn();
     }
@@ -585,6 +592,7 @@ export default class MatchRoom extends Server<Env> {
 
     const wasActiveSeat =
       this.tableState.toAct === seatIndex && this.tableState.street !== "complete";
+    let isShowdown = false;
 
     // Step 1: if active seat, auto-fold/check so the hand can continue
     if (wasActiveSeat) {
@@ -595,6 +603,7 @@ export default class MatchRoom extends Server<Env> {
         : { seat: seatIndex, type: "fold", amount: 0 };
       const { state, events } = applyAction(this.tableState, action);
       this.tableState = state;
+      isShowdown = events.some((e) => e.type === "showdown");
       for (const event of events) {
         this.broadcast(encode({ t: "event", event }));
       }
@@ -619,7 +628,7 @@ export default class MatchRoom extends Server<Env> {
     if (wasActiveSeat && this.tableState) {
       this.broadcastSnapshots();
       if (this.tableState.street === "complete") {
-        this.onHandComplete();
+        this.onHandComplete(isShowdown);
       } else {
         this.sendYourTurn();
       }
@@ -627,7 +636,7 @@ export default class MatchRoom extends Server<Env> {
   }
 
   /** Called when a hand completes — bust detection, match clock check, next hand. */
-  private onHandComplete(): void {
+  private onHandComplete(isShowdown: boolean): void {
     if (!this.tableState) return;
     this.turnTimer.cancel();
 
@@ -648,7 +657,7 @@ export default class MatchRoom extends Server<Env> {
       return;
     }
 
-    setTimeout(() => this.startNextHand(), INTER_HAND_PAUSE_MS);
+    setTimeout(() => this.startNextHand(), isShowdown ? SHOWDOWN_PAUSE_MS : INTER_HAND_PAUSE_MS);
   }
 
   /** Returns true when only 0 or 1 non-busted seats remain. */

@@ -1,13 +1,15 @@
 import type React from "react";
 import { useState, useEffect } from "react";
 import type { ActionMask } from "@poker/shared";
-import { maskToButtons, clampRaiseTo, formatChips } from "./viewHelpers.js";
+import { maskToButtons, clampRaiseTo, formatChips, quickRaiseOptions } from "./viewHelpers.js";
 
 export default function ActionBar({
   mask,
+  currentBet,
   onAction,
 }: {
   mask: ActionMask;
+  currentBet: number;
   onAction: (action: "fold" | "check" | "call" | "raise", amount?: number) => void;
 }) {
   const b = maskToButtons(mask);
@@ -17,13 +19,25 @@ export default function ActionBar({
     setRaiseTo(mask.minRaiseTo);
   }, [mask]);
 
+  const quickRaises = quickRaiseOptions(mask, currentBet);
+
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", padding: 12 }}>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", padding: 12, flexWrap: "wrap" }}>
       {b.fold && <button onClick={() => onAction("fold")} style={btn("#7a2d2d")}>Fold</button>}
       {b.check && <button onClick={() => onAction("check")} style={btn("#2d5d7a")}>Check</button>}
       {b.call && <button onClick={() => onAction("call", b.callAmount)} style={btn("#2d5d7a")}>Call {formatChips(b.callAmount)}</button>}
       {b.raise && (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {quickRaises.map((q) => (
+            <button
+              key={q.label}
+              onClick={() => onAction("raise", q.raiseTo)}
+              style={btn("#3d3560")}
+              title={`Raise to ${formatChips(q.raiseTo)}`}
+            >
+              {q.label}
+            </button>
+          ))}
           <input
             type="range"
             min={mask.minRaiseTo}

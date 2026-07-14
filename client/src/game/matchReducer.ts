@@ -11,6 +11,9 @@ export interface MatchUiState {
   error: string | null;
   lastEvent: GameEvent | null;
   actionBySeat: Record<number, { action: string; amount: number } | undefined>;
+  winners: number[];
+  showdownThisHand: boolean;
+  handCompleteSeq: number;
 }
 
 export const initialMatchState: MatchUiState = {
@@ -24,6 +27,9 @@ export const initialMatchState: MatchUiState = {
   error: null,
   lastEvent: null,
   actionBySeat: {},
+  winners: [],
+  showdownThisHand: false,
+  handCompleteSeq: 0,
 };
 
 export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState {
@@ -62,8 +68,32 @@ export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState 
           error: null,
         };
       }
-      if (event.type === "street" || event.type === "handComplete") {
+      if (event.type === "street") {
         return { ...state, lastEvent: event, actionBySeat: {}, error: null };
+      }
+      if (event.type === "blind") {
+        // First blind(s) posted mean a fresh hand — clear the previous hand's winner glow.
+        return { ...state, lastEvent: event, winners: [], showdownThisHand: false, error: null };
+      }
+      if (event.type === "showdown") {
+        return { ...state, lastEvent: event, showdownThisHand: true, error: null };
+      }
+      if (event.type === "award") {
+        return {
+          ...state,
+          lastEvent: event,
+          winners: state.winners.includes(event.seat) ? state.winners : [...state.winners, event.seat],
+          error: null,
+        };
+      }
+      if (event.type === "handComplete") {
+        return {
+          ...state,
+          lastEvent: event,
+          actionBySeat: {},
+          handCompleteSeq: state.handCompleteSeq + 1,
+          error: null,
+        };
       }
       return { ...state, lastEvent: event, error: null };
     }

@@ -17,27 +17,58 @@ const ACTION_COLOR: Record<string, string> = {
   raise: "#ef4444",
 };
 
+const POSITION_COLOR: Record<string, string> = {
+  BTN: "#f0c419",
+  SB: "#38bdf8",
+  BB: "#38bdf8",
+  LJ: "#94a3b8",
+  HJ: "#94a3b8",
+  CO: "#94a3b8",
+};
+
 export default function SeatView({
   seat,
   isOwn,
   isToAct,
   ownHole,
   lastAction,
+  position,
+  isWinner,
 }: {
   seat: PublicSeat | null;
   isOwn: boolean;
   isToAct: boolean;
   ownHole: [number, number] | null;
   lastAction?: { action: string; amount: number };
+  position?: string;
+  isWinner?: boolean;
 }) {
   if (!seat) {
-    return <div style={box(false)}><span style={{ opacity: 0.4 }}>empty</span></div>;
+    return <div style={box(false, false)}><span style={{ opacity: 0.4 }}>empty</span></div>;
   }
   const hole = seat.holeCards ?? (isOwn ? ownHole : null);
   const label = seat.isBot ? `🤖 ${seat.id}` : seat.id.slice(0, 8);
   const dim = seat.status === "folded" || seat.status === "busted";
   return (
-    <div style={{ ...box(isToAct), opacity: dim ? 0.5 : 1, position: "relative" }}>
+    <div style={{ ...box(isToAct, !!isWinner), opacity: dim ? 0.5 : 1, position: "relative" }}>
+      {position && (
+        <div
+          style={{
+            position: "absolute",
+            top: -10,
+            left: -10,
+            background: POSITION_COLOR[position] ?? "#374151",
+            color: "#0e1116",
+            fontWeight: 800,
+            fontSize: 11,
+            padding: "2px 6px",
+            borderRadius: 6,
+            boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+          }}
+        >
+          {position}
+        </div>
+      )}
       {lastAction && (
         <div
           key={`${lastAction.action}-${lastAction.amount}`}
@@ -76,9 +107,11 @@ export default function SeatView({
   );
 }
 
-function box(active: boolean): React.CSSProperties {
+function box(active: boolean, isWinner: boolean): React.CSSProperties {
   return {
     width: 130, padding: 8, borderRadius: 10, textAlign: "center",
     background: "#16203a", border: active ? "2px solid #f0c419" : "2px solid transparent",
+    boxShadow: isWinner ? "0 0 18px 4px rgba(255, 215, 0, 0.85)" : undefined,
+    animation: isWinner ? "seatWinnerGlow 1.1s ease-in-out infinite" : undefined,
   };
 }

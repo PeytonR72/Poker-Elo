@@ -1,7 +1,13 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MatchUiState } from "./matchReducer.js";
 import SeatView from "./SeatView.js";
 import Board from "./Board.js";
+import { positionLabel } from "./viewHelpers.js";
+
+// UI-only feedback timings (not poker rules — see shared/src/constants.ts for those).
+const WINNER_GLOW_MS = 2_500;
+const WINNER_GLOW_MS_SHOWDOWN = 6_000;
 
 // Six fixed positions around an oval (own seat forced to the bottom-center by rotation).
 const POSITIONS: Array<React.CSSProperties> = [
@@ -15,6 +21,18 @@ const POSITIONS: Array<React.CSSProperties> = [
 
 export default function Table({ state }: { state: MatchUiState }) {
   const view = state.view;
+
+  const [glowSeats, setGlowSeats] = useState<number[]>([]);
+  const lastHandleSeq = useRef(0);
+  useEffect(() => {
+    if (state.handCompleteSeq === lastHandleSeq.current) return;
+    lastHandleSeq.current = state.handCompleteSeq;
+    setGlowSeats(state.winners);
+    const duration = state.showdownThisHand ? WINNER_GLOW_MS_SHOWDOWN : WINNER_GLOW_MS;
+    const timer = setTimeout(() => setGlowSeats([]), duration);
+    return () => clearTimeout(timer);
+  }, [state.handCompleteSeq, state.winners, state.showdownThisHand]);
+
   if (!view) return <p style={{ textAlign: "center" }}>Waiting for the table…</p>;
   const n = view.seats.length;
   const own = state.ownSeat ?? 0;
@@ -42,6 +60,8 @@ export default function Table({ state }: { state: MatchUiState }) {
               isToAct={view.toAct === i}
               ownHole={state.ownHole}
               lastAction={state.actionBySeat[i]}
+              position={positionLabel(i, view.buttonIndex)}
+              isWinner={glowSeats.includes(i)}
             />
           </div>
         );

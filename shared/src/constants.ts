@@ -28,6 +28,12 @@ export const TIMEBANK_INITIAL_MS = 30000;
 export const TIMEBANK_REPLENISH_MS = 0;
 export const MATCH_CODE_LENGTH = 6;
 
+// Per-turn clock for HUMAN seats only (bots act on their own decision-delay timer,
+// see BOT_DECISION_DELAY_MIN_MS/MAX_MS, and never start this timer).
+export const HUMAN_TURN_TIME_MS = 10_000;
+// The river gets extra thinking time since it's the last, most consequential decision.
+export const HUMAN_TURN_TIME_RIVER_MS = 15_000;
+
 // A hand already in progress when the buzzer fires plays out to completion.
 export const MATCH_GRACE_FINISH = true;
 // Collapse-to-one ends the match early.

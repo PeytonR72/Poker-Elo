@@ -41,7 +41,7 @@ export default function GameScreen({
       )}
       <Table state={state} />
       {state.turn ? (
-        <ActionBar mask={state.turn.mask} onAction={sendAction} />
+        <ActionBar mask={state.turn.mask} currentBet={state.view?.currentBet ?? 0} onAction={sendAction} />
       ) : (
         <div style={{ textAlign: "center", padding: 12, opacity: 0.7 }}>Waiting…</div>
       )}
