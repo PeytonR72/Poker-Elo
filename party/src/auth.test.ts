@@ -28,7 +28,7 @@ describe("verifyJwt", () => {
       .setProtectedHeader({ alg: "HS256" })
       .sign(key);
 
-    const payload = await verifyJwt(token, secret);
+    const payload = await verifyJwt(token, { secret });
     expect(payload).toEqual({ sub: "user-123" });
   });
 
@@ -38,7 +38,7 @@ describe("verifyJwt", () => {
       .setProtectedHeader({ alg: "HS256" })
       .sign(key);
 
-    await expect(verifyJwt(token, "test-secret")).rejects.toThrow();
+    await expect(verifyJwt(token, { secret: "test-secret" })).rejects.toThrow();
   });
 
   it("rejects a JWT without a sub claim", async () => {
@@ -48,6 +48,31 @@ describe("verifyJwt", () => {
       .setProtectedHeader({ alg: "HS256" })
       .sign(key);
 
-    await expect(verifyJwt(token, secret)).rejects.toThrow("JWT missing sub");
+    await expect(verifyJwt(token, { secret })).rejects.toThrow("JWT missing sub");
+  });
+
+  it("rejects an HS256 token when no secret is configured", async () => {
+    const key = new TextEncoder().encode("some-secret");
+    const token = await new SignJWT({ sub: "user-123" })
+      .setProtectedHeader({ alg: "HS256" })
+      .sign(key);
+
+    await expect(verifyJwt(token, {})).rejects.toThrow("no shared secret is configured");
+  });
+
+  it("rejects a non-HS256 token when no supabaseUrl is configured", async () => {
+    // Supabase's newer projects sign with ES256, verified via JWKS rather than a shared
+    // secret — this is a regression test for exactly that dispatch path, without requiring
+    // a live network call: an unconfigured supabaseUrl must fail fast with a clear error
+    // rather than silently falling back to (or crashing inside) HS256 verification.
+    const { generateKeyPair, SignJWT: SignJWTLocal } = await import("jose");
+    const { privateKey } = await generateKeyPair("ES256");
+    const token = await new SignJWTLocal({ sub: "user-456" })
+      .setProtectedHeader({ alg: "ES256" })
+      .sign(privateKey);
+
+    await expect(verifyJwt(token, { secret: "irrelevant-for-es256" })).rejects.toThrow(
+      "no supabaseUrl is configured"
+    );
   });
 });

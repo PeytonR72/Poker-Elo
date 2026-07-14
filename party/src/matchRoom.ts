@@ -285,9 +285,9 @@ export default class MatchRoom extends Server<Env> {
           throw new Error("dev: tokens not allowed in production");
         }
       } else {
-        // Otherwise verify as JWT
-        if (!jwtSecret) throw new Error("No JWT secret configured");
-        const auth = await verifyJwt(jwt, jwtSecret);
+        // Otherwise verify as JWT — via shared secret (legacy HS256 projects) or
+        // JWKS (newer ES256 projects); verifyJwt dispatches on the token's own alg.
+        const auth = await verifyJwt(jwt, { secret: jwtSecret, supabaseUrl: this.env.SUPABASE_URL });
         playerId = auth.sub;
       }
     } catch {

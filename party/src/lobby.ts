@@ -105,9 +105,9 @@ export default class Lobby extends Server<Env> {
         // dev: tokens not allowed in production
         return null;
       }
-      // Otherwise verify as JWT
-      if (!secret) return null;
-      const auth = await verifyJwt(jwt, secret);
+      // Otherwise verify as JWT — via shared secret (legacy HS256 projects) or
+      // JWKS (newer ES256 projects); verifyJwt dispatches on the token's own alg.
+      const auth = await verifyJwt(jwt, { secret, supabaseUrl: this.env.SUPABASE_URL });
       return auth.sub;
     } catch {
       return null;
