@@ -4,16 +4,21 @@
 
 **Goal:** Move `party/` off the `partykit` CLI/platform onto Cloudflare's `partyserver` package deployed with `wrangler` to the user's own Cloudflare account, unblocking cloud deploy on the Workers **Free** plan (SQLite-backed Durable Objects) without the $5/mo Workers Paid upgrade that `partykit deploy` currently requires.
 
-**Architecture:** `MatchRoom` and `Lobby` become `partyserver` `Server` subclasses (which extend Cloudflare's native `DurableObject`) instead of PartyKit `Party.Server` implementations. All internal business logic (hand engine calls, betting, ELO, matchmaking) is unchanged — only the outer shell (imports, base class, constructor, and the handful of `party.X` → `this.X` API renames) changes. Client `PartySocket` connections are unaffected: `routePartykitRequest`'s default URL convention (`/parties/:server/:name`, matching binding names kebab-cased) is identical to what the client already sends (`party: "main"` / `party: "lobby"`), so `useMatchSocket.ts`/`useLobbySocket.ts` need no code changes — only `VITE_PARTYKIT_HOST` gets repointed after deploy. Local dev and CI testing move from ad-hoc `Party.Party` mocks to Cloudflare's official `@cloudflare/vitest-pool-workers`, which runs tests against a real simulated Workers runtime (Miniflare) with real Durable Object bindings.
+**Architecture:** `MatchRoom` and `Lobby` become `partyserver` `Server` subclasses (which extend Cloudflare's native `DurableObject`) instead of PartyKit `Party.Server` implementations. All internal business logic (hand engine calls, betting, ELO, matchmaking) is unchanged — only the outer shell (imports, base class, constructor, and the handful of `party.X` → `this.X` API renames) changes. Client `PartySocket` connections are unaffected: `routePartykitRequest`'s default URL convention (`/parties/:server/:name`, matching binding names kebab-cased) is identical to what the client already sends (`party: "main"` / `party: "lobby"`), so `useMatchSocket.ts`/`useLobbySocket.ts` need no code changes — only `VITE_PARTYKIT_HOST` gets repointed after deploy. Automated unit testing of the ported code is not possible in this environment (see Revision Note 2 below) — verification instead happens via TypeScript compilation, code review against the original file, and scripted integration checks against a real `wrangler dev` instance (a real local Workers runtime, proven working in Task 1).
 
-**Tech Stack:** `partyserver` (npm), `wrangler` (Cloudflare CLI), `@cloudflare/vitest-pool-workers`, Vitest 4.x (upgrade from 2.1), existing `@poker/shared` engine untouched.
+**Tech Stack:** `partyserver` (npm), `wrangler` (Cloudflare CLI), existing `@poker/shared` engine untouched. No test-runtime changes — Vitest stays exactly as it was before this migration.
+
+**Revision note 1 (2026-07-12):** the original plan called for `@cloudflare/vitest-pool-workers` (Cloudflare's official Workers-runtime test pool) plus a Vitest 2→4 upgrade, to test `MatchRoom`/`Lobby` against real simulated Durable Objects. Abandoned after a verified, unfixable internal crash (`TypeError: this.getMockerRegistry(...).getById is not a function`, thrown before any test file loads) across four version pinnings of `vitest`/`@cloudflare/vitest-pool-workers`, including a release-date-matched pairing (`vitest@4.1.0` + `pool-workers@0.13.0`, released one day apart) — ruling out a simple version mismatch. Also ruled out Vitest 4's `test.projects` multi-project structure as the cause (identical crash running `party/`'s config fully standalone). This is a real, current tooling incompatibility in this environment, plausibly Windows/Miniflare-specific.
+
+**Revision note 2 (2026-07-12) — supersedes Revision Note 1's fallback:** the planned fallback ("keep testing with plain mocks, just retyped") turned out to be impossible, not just lower-fidelity: `partyserver`'s `Server` class extends Cloudflare's `DurableObject`, imported from the `cloudflare:workers` built-in — a module that only resolves inside an actual Workers runtime. **Any value-import of `partyserver` crashes immediately under plain Node** (confirmed directly: `import { Server } from "partyserver"` under plain `node --input-type=module` throws `ERR_UNSUPPORTED_ESM_URL_SCHEME` on `cloudflare:workers`). This means the instant `matchRoom.ts`/`lobby.ts` import `partyserver`, the existing `matchRoom.test.ts` (92 tests)/`lobby.test.ts` (6 tests) become impossible to run at all under plain Vitest — not adaptable, not portable, structurally blocked. **User-confirmed decision:** delete these two test files as part of the port (Tasks 3/4 below), accepting the loss of their fine-grained coverage. Replace with scripted integration verification against `wrangler dev` (real local Workers runtime, proven working since Task 1's smoke deploy succeeded) — covering the same key behaviors at a coarser, end-to-end grain (a real hand plays out correctly, matchmaking connects a room) rather than 98 unit-level assertions. `auth.test.ts` (7 tests) and `matchmaker.test.ts` (7 tests) are pure functions with no `partykit`/`partyserver` dependency and are entirely unaffected — they keep running and passing exactly as today.
 
 ## Global Constraints
 
 - All poker-numeric values still come only from `shared/src/constants.ts` — this migration touches no game logic.
 - Server-authoritative invariant is unchanged: only the deployed Durable Object mutates real state; clients still get `redactFor(...)` views.
 - Relative imports in touched files still end in `.js`.
-- `party/` currently has 92 tests in `matchRoom.test.ts`, 6 in `lobby.test.ts`, 7 in `auth.test.ts`, 7 in `matchmaker.test.ts` (112 total) — every one must still pass (rewritten against the new harness, not skipped) before this migration is considered done. Root `npm test` (234 tests total across the monorepo) must stay green throughout — `shared/` and `client/` tests are not expected to change and are the regression gate for the Vitest major-version bump.
+- `party/` currently has 92 tests in `matchRoom.test.ts`, 6 in `lobby.test.ts`, 7 in `auth.test.ts`, 7 in `matchmaker.test.ts` (112 total). Per Revision Note 2: `matchRoom.test.ts` and `lobby.test.ts` (98 tests) are deleted as part of this migration — a known, accepted, user-confirmed regression in automated coverage, not an oversight. `auth.test.ts` and `matchmaker.test.ts` (14 tests) are pure functions with zero `partykit`/`partyserver` dependency and MUST keep passing unchanged throughout. Root `npm test` therefore goes from 234 → 136 tests (234 − 92 − 6) by the end of Task 4, and must show exactly that count with zero unexpected failures — a different final number is itself a signal something broke that shouldn't have.
+- Every deleted unit-test scenario's *intent* must be covered at a coarser grain by a scripted `wrangler dev` integration check before the corresponding task is considered done (see Tasks 3/4's verification steps) — deleting the tests must not mean deleting the verification, only changing its shape.
 - `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are already available in `.env.cloudflare` (git-ignored) — deploy/wrangler commands read them as env vars, never pasted into files tracked by git.
 - Never run `wrangler` or `partykit` commands with a flag that sweeps the project root `.env` (e.g. `--with-vars`) — that file contains `DEV_TOKENS=true`, which must never reach production. Secrets go to Cloudflare exclusively via explicit `wrangler secret put <NAME>` (one at a time) or `--var NAME=value` (never `--with-vars`/`--with-env`).
 - Every deploy to production must be followed by the smoke test: a `dev:<id>` token sent to the deployed room MUST receive `auth_failed`. If it doesn't, treat this as a P0 stop-the-line issue — do not continue.
@@ -29,12 +34,12 @@
 | `party/src/lobby.ts` | Modified: same shell conversion; `party.context.parties["main"].get(roomId).fetch(...)` → `getServerByName(this.env.MAIN, roomId).then(stub => stub.fetch(...))`. |
 | `party/src/worker.ts` *(new)* | The Worker `fetch` entrypoint: calls `routePartykitRequest(request, env)`, exports `MatchRoom`/`Lobby` as named Durable Object classes. Replaces `partykit.json`'s `main`/`parties` config. |
 | `party/wrangler.jsonc` *(new)* | Durable Object bindings (`MAIN` → `MatchRoom`, `LOBBY` → `Lobby`), `new_sqlite_classes` migration, custom domain route, compatibility date. Replaces `partykit.json`. |
-| `party/vitest.config.ts` *(new)* | Points `@cloudflare/vitest-pool-workers` at `party/wrangler.jsonc` — scopes the Workers test pool to the `party/` workspace only. |
-| `party/src/matchRoom.test.ts` | Modified: mock-`Party.Party` harness replaced with real DO instances obtained via `env.MAIN`/helpers from `cloudflare:test`. Test *assertions* (the 92 `it(...)` bodies) are unchanged — only the setup helpers at the top of the file change. |
-| `party/src/lobby.test.ts` | Modified: same harness swap; assertions unchanged. |
-| `party/package.json` | `partykit` dependency removed; `partyserver`, `wrangler`, `@cloudflare/vitest-pool-workers` added; `dev`/`deploy` scripts now call `wrangler`. |
-| `vitest.config.ts` (root) | Modified: becomes a `defineWorkspace`-style multi-project config — `shared/`+`client/` keep the plain Node pool, `party/` uses its own `vitest.config.ts` with the Workers pool. |
-| `package.json` (root) | `vitest` devDependency bumped `^2.1.0` → `^4.1.0`. |
+| `party/src/matchRoom.test.ts` | **Deleted** (Task 4) — cannot run once `matchRoom.ts` imports `partyserver` (see Revision Note 2). Coverage intent moves to Task 5's `wrangler dev` integration script. |
+| `party/src/lobby.test.ts` | **Deleted** (Task 3) — same reason. |
+| `party/.dev.vars` *(new, git-ignored)* | Local-only `wrangler dev` secrets (`DEV_TOKENS=true`) for Task 5's integration verification. |
+| `party/package.json` | `partykit` dependency removed; `partyserver`, `wrangler` added; `dev`/`deploy` scripts now call `wrangler`. Vitest stays at whatever version the root workspace already pins (no bump). |
+| `vitest.config.ts` (root) | No change — stays the existing single flat config; no workspace/project split needed since there's no separate Workers test pool. |
+| `package.json` (root) | No change — `vitest` devDependency stays as-is. |
 | `partykit.json` | Deleted. |
 | `client/src/lib/env.ts` | No code change — `VITE_PARTYKIT_HOST` value changes at deploy time only (Vercel env var), not in source. |
 | `docs/deploy-partykit-cloudflare.md` | Superseded — replaced by a new `docs/deploy-partyserver-cloudflare.md` runbook capturing the actual working steps once Task 6 succeeds. |
@@ -120,125 +125,52 @@ Confirm the deploy log shows no error. Then run `npx wrangler delete pokerelo-sm
 
 ---
 
-### Task 2: Test infrastructure — add `@cloudflare/vitest-pool-workers`, scoped to `party/` only
+### Task 2: Revert the `@cloudflare/vitest-pool-workers` experiment; add `partyserver` as a dependency
+
+**Superseded 2026-07-12** — see the Revision Note near the top of this plan. `@cloudflare/vitest-pool-workers` crashes internally and unfixably in this environment across multiple version pins; the user has confirmed dropping it in favor of the existing plain-mock test approach. This task is now a small cleanup + one forward-looking dependency add, not new test infrastructure.
 
 **Files:**
-- Modify: `package.json:16` (root) — bump `vitest` devDependency.
-- Create: `vitest.workspace.ts` (root)
-- Create: `party/vitest.config.ts`
-- Create: `party/wrangler.jsonc` (scaffold only — no real bindings yet, just enough for the test pool to boot)
-- Modify: `party/package.json`
+- Modify: `party/package.json` — remove any `@cloudflare/vitest-pool-workers`/bumped-`vitest`/`wrangler` devDependency changes from the abandoned attempt; add `partyserver` as a real dependency (needed by Tasks 3/4's mock retyping and production code); keep `typescript`/`vitest` devDependencies exactly as they were before this migration started.
+- Modify: `package.json` (root) — revert `vitest` devDependency to its original value if it was changed.
+- Delete (if present from the abandoned attempt): `vitest.workspace.ts`, `party/vitest.config.ts`, `party/wrangler.jsonc` (the real `wrangler.jsonc` gets created properly in Task 5 — no value in keeping an early throwaway scaffold).
+- Modify (if changed from the abandoned attempt): `vitest.config.ts` (root) — restore to its original single flat config.
 
 **Interfaces:**
-- Produces: a working `npm test` at the root that still runs all 234 existing tests (`shared/`, `client/`, `party/`) green, with `party/` now running under the Workers pool instead of the plain Node pool.
+- Produces: `party/package.json` with `partyserver` installed and resolvable (`import { Server, getServerByName } from "partyserver"` and `import type { Connection } from "partyserver"` must both work) — this is what Task 3 consumes.
+- The existing `npm test` (root) must still run all 234 tests, unchanged in count and pool, exactly as before this migration started.
 
-- [ ] **Step 1: Bump root Vitest and add the workspace pool split**
+- [ ] **Step 1: Check current state and revert any abandoned-attempt changes**
 
-Modify `package.json` (root):
+Run `git status` and `git diff` (repo root) to see what's currently modified/untracked from the earlier `@cloudflare/vitest-pool-workers` attempt. Revert/delete anything not part of this task's Files list above — specifically:
+- `git checkout -- package.json vitest.config.ts` if either was modified for the abandoned attempt (restores the original single flat Vitest config and original root `vitest` devDependency version).
+- Delete `vitest.workspace.ts`, `party/vitest.config.ts`, `party/wrangler.jsonc` if they exist from the abandoned attempt.
+- In `party/package.json`, remove `@cloudflare/vitest-pool-workers` and any `wrangler`/bumped-`vitest` devDependency entries added for the abandoned attempt, restoring `devDependencies` to exactly: `{"typescript": "^5.4.0", "vitest": "^1.6.0"}` (its original content, per the file as it existed before this migration).
+
+- [ ] **Step 2: Add `partyserver` as a real dependency**
+
+Modify `party/package.json`'s `dependencies` block to add `partyserver`:
 ```json
-"vitest": "^4.1.0"
-```
-
-Create `vitest.workspace.ts` (root, new file — Vitest's multi-project mechanism supersedes a single flat `vitest.config.ts` when workspaces need different pools):
-```ts
-import { defineWorkspace } from "vitest/config";
-
-export default defineWorkspace([
-  {
-    test: {
-      name: "node",
-      include: ["shared/src/**/*.test.ts", "client/src/**/*.test.ts"],
-      environment: "node",
-    },
-  },
-  "party/vitest.config.ts",
-]);
-```
-
-Modify `vitest.config.ts` (root) — narrow it so it no longer double-matches `party/`:
-```ts
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    include: ["shared/src/**/*.test.ts", "client/src/**/*.test.ts"],
-    environment: "node",
-  },
-});
-```
-(Kept for editor/IDE tooling that reads a flat config; `vitest.workspace.ts` is authoritative for `vitest run`.)
-
-- [ ] **Step 2: Scaffold `party/wrangler.jsonc` (test-only shape for now)**
-
-```jsonc
-// party/wrangler.jsonc
-{
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "pokerelo-party",
-  "main": "src/worker.ts",
-  "compatibility_date": "2024-11-01",
-  "durable_objects": {
-    "bindings": [
-      { "name": "MAIN", "class_name": "MatchRoom" },
-      { "name": "LOBBY", "class_name": "Lobby" }
-    ]
-  },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MatchRoom", "Lobby"] }
-  ]
+"dependencies": {
+  "@poker/shared": "*",
+  "jose": "^5.0.0",
+  "partyserver": "^0.0.66"
 }
 ```
-This references `src/worker.ts`, which doesn't exist yet (created in Task 4) — that's fine, `wrangler.jsonc` is only read for its config shape by the test pool at this step, not executed.
+Leave `partykit` in place for now — Task 3/4 remove it once `matchRoom.ts`/`lobby.ts` no longer import from it. Removing it here would break the still-untouched `party/src/*.ts` files.
 
-- [ ] **Step 3: Add `party/vitest.config.ts`**
+- [ ] **Step 3: Install and verify**
 
-```ts
-// party/vitest.config.ts
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
-
-export default defineWorkersConfig({
-  test: {
-    name: "party",
-    include: ["src/**/*.test.ts"],
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: "./wrangler.jsonc" },
-      },
-    },
-  },
-});
-```
-
-- [ ] **Step 4: Install and verify the harness boots (before touching any party/ source)**
-
-Modify `party/package.json`:
-```json
-"devDependencies": {
-  "typescript": "^5.4.0",
-  "vitest": "^4.1.0",
-  "@cloudflare/vitest-pool-workers": "latest",
-  "wrangler": "^3.90.0"
-}
-```
 Run (repo root): `npm install`
+Then: `npm test`
+Expected: all 234 tests pass, identical to the baseline recorded before this migration started (same test file list, same counts, no Workers-pool-related output). This confirms the abandoned attempt left no residue.
 
-Expected: install succeeds. The existing `party/src/*.test.ts` files still import `partykit/server` types and construct mock `Party.Party` objects — they are NOT yet compatible with the Workers pool's stricter runtime (no arbitrary object literals standing in for `DurableObjectState`). **Do not fix that here** — this step only proves the pool loads. Run:
-```
-npm test -- --project party
-```
-Expected: FAILS (existing tests error out because `partykit/server` types/mocks don't resolve inside the Workers runtime sandbox, or `wrangler.jsonc`'s `main: "src/worker.ts"` doesn't exist yet). Confirm the failure is about missing `worker.ts` / incompatible mocks, NOT an installation/config error — that distinction is the checkpoint for this task.
-
-- [ ] **Step 5: Verify the rest of the monorepo is unaffected**
-
-Run: `npm test -- --project node`
-Expected: all pre-existing `shared/` and `client/` tests (the ones not in `party/`) still pass — 234 minus the `party/` count. This is the regression gate proving the Vitest 2→4 bump didn't break anything outside `party/`.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add package.json vitest.config.ts vitest.workspace.ts party/package.json party/vitest.config.ts party/wrangler.jsonc
-git commit -m "chore(party): scaffold vitest-pool-workers test harness for partyserver migration"
+git add party/package.json package-lock.json
+git commit -m "chore(party): revert vitest-pool-workers experiment, add partyserver dependency"
 ```
+(If `package.json`/`vitest.config.ts` at the repo root were never actually modified — e.g. the abandoned attempt was caught and reverted before those files landed — omit them from this commit; only stage what actually changed.)
 
 ---
 
@@ -247,7 +179,7 @@ git commit -m "chore(party): scaffold vitest-pool-workers test harness for party
 **Files:**
 - Create: `party/src/env.ts`
 - Modify: `party/src/lobby.ts` (full file — shell conversion, business logic identical)
-- Modify: `party/src/lobby.test.ts` (harness only — all 6 `it(...)` bodies unchanged)
+- Delete: `party/src/lobby.test.ts` — per Revision Note 2, this file cannot run once `lobby.ts` imports `partyserver` (any value-import of `partyserver` crashes under plain Node). Its 6 tests' intent is covered later, in Task 5, by a single end-to-end `wrangler dev` integration check once both `Lobby` and `MatchRoom` are ported and a real Worker entrypoint exists to run them (there is no working local dev server yet at this point in the migration — `worker.ts`/`wrangler.jsonc` are created in Task 5 — so live verification isn't possible until then). This task's acceptance gate is TypeScript compiling cleanly plus careful line-by-line diff review against the original file.
 
 **Interfaces:**
 - Consumes: `getServerByName` from `"partyserver"`; `Env` from `./env.js`.
@@ -270,7 +202,7 @@ export interface Env {
   DEV_TOKENS?: string;
 }
 ```
-(Add `@cloudflare/workers-types` as a `party/package.json` devDependency alongside the others from Task 2, Step 4 if not already pulled in transitively by `wrangler`.)
+Add `@cloudflare/workers-types` as a `party/package.json` devDependency (`"@cloudflare/workers-types": "^4.0.0"`) — this is a stable, standalone ambient-types package (unrelated to the abandoned `@cloudflare/vitest-pool-workers` test runtime), needed here purely for the `DurableObjectNamespace` type.
 
 - [ ] **Step 2: Convert `lobby.ts`'s shell**
 
@@ -323,70 +255,24 @@ Then, throughout the rest of the file (existing lines ~25–196), apply these me
 - `this.party.getConnections()` → `this.getConnections()` (in `sendTo`)
 - Delete the old `readonly party: Party.Party` constructor parameter reference wherever it appears (already handled in Step 2's replacement above).
 
-- [ ] **Step 3: Rewrite the test harness in `lobby.test.ts`**
+- [ ] **Step 3: Delete the now-unrunnable test file**
 
-Replace lines 1–41 (imports through `makeLobby`) with:
-```ts
-import { describe, it, expect } from "vitest";
-import { env, runInDurableObject } from "cloudflare:test";
-import { encode } from "@poker/shared";
-import type { Env } from "./env.js";
-
-interface FakeConn {
-  id: string;
-  sent: string[];
-  send(m: string): void;
-  close(): void;
-}
-function makeConn(id: string): FakeConn {
-  return { id, sent: [], send(m) { this.sent.push(m); }, close() {} };
-}
-
-/** Runs `fn` with a live Lobby DO instance bound to a fresh id, env overridden per-test. */
-async function withLobby<T>(
-  envOverrides: Partial<Env>,
-  fn: (lobby: import("./lobby.js").default, conns: Map<string, FakeConn>) => Promise<T>,
-): Promise<T> {
-  const id = env.LOBBY.idFromName("test-lobby-" + Math.random());
-  const stub = env.LOBBY.get(id);
-  const conns = new Map<string, FakeConn>();
-  return runInDurableObject(stub, async (instance) => {
-    Object.assign(instance.env, envOverrides);
-    return fn(instance, conns);
-  });
-}
-
-async function connect(
-  lobby: import("./lobby.js").default,
-  conns: Map<string, FakeConn>,
-  id: string,
-): Promise<FakeConn> {
-  const conn = makeConn(id);
-  conns.set(id, conn);
-  lobby.onConnect(conn as unknown as import("partyserver").Connection);
-  await lobby.onMessage(
-    encode({ t: "hello", jwt: `dev:${id}` }),
-    conn as unknown as import("partyserver").Connection,
-  );
-  return conn;
-}
+```bash
+git rm party/src/lobby.test.ts
 ```
 
-Then update each of the 6 `it(...)` bodies to call `withLobby({ DEV_TOKENS: "true" }, async (lobby, conns) => { ...existing body... })` instead of `makeLobby([])`. The assertions inside each test (`expect(lobby.waiterCount).toBe(1)`, etc.) are copied verbatim from the current file — only the outer setup call changes.
-
-For the one test that currently overrides `context.parties.main.get` to simulate provisioning (fetch success/throw), instead pre-register a `MatchRoom`-shaped stub is unnecessary — `getServerByName(this.env.MAIN, roomId)` against the real `env.MAIN` binding in the test runtime will route to a real (empty, unprovisioned) `MatchRoom` DO. Its `onRequest` (ported in Task 4) already returns `new Response("OK")` for a well-formed POST body, and a `Response` with a 400 for a malformed one — so the "provisioning failed" test case (simulating a thrown fetch) should instead assert against a **malformed roomId that can't route** or be adjusted to check the `!res.ok` branch by POSTing an intentionally bad body (`{}`) to produce `bad_roster` (400), which already exercises the "leave players queued on non-ok response" branch identically to the old throw-based test. Flag this test as needing a rewritten scenario, not a mechanical port — note it explicitly in the task's self-review.
-
-- [ ] **Step 4: Run and verify**
+- [ ] **Step 4: Typecheck**
 
 ```
-npm test -- --project party -t "Lobby party"
+npm run typecheck
 ```
-Expected: all 6 tests pass.
+Expected: passes. There is no live/runtime verification for `Lobby` in isolation at this point in the migration — real verification happens once in Task 5 (Step 6), after `MatchRoom` (Task 4) is also ported and a real Worker entrypoint exists to run both against `wrangler dev`. Compensate for the lack of live feedback here by reviewing your own diff line-by-line against the original `party/src/lobby.ts` before moving on: every line that isn't in the substitution table in Step 2 should be byte-identical to the original.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add party/src/env.ts party/src/lobby.ts party/src/lobby.test.ts party/package.json
+git add party/src/env.ts party/src/lobby.ts party/package.json
+git rm party/src/lobby.test.ts
 git commit -m "refactor(party): migrate Lobby from partykit to partyserver"
 ```
 
@@ -396,7 +282,7 @@ git commit -m "refactor(party): migrate Lobby from partykit to partyserver"
 
 **Files:**
 - Modify: `party/src/matchRoom.ts` (full file — shell conversion only; business-logic method bodies at lines ~401–800 are copied verbatim)
-- Modify: `party/src/matchRoom.test.ts` (harness only — all 92 `it(...)` bodies unchanged)
+- Delete: `party/src/matchRoom.test.ts` — per Revision Note 2, cannot run once `matchRoom.ts` imports `partyserver`. Its 92 tests' intent is covered by Task 5's end-to-end `wrangler dev` integration check.
 
 **Interfaces:**
 - Consumes: `Env` from `./env.js` (Task 3, Step 1).
@@ -506,75 +392,37 @@ Copy the body of every method (`onRequest`, `onConnect`, `onClose`, `onError`, `
 
 Every other line — the poker engine calls, the ELO math, the timer/bot logic, the reconnect handling — is copied unchanged. Do not restructure control flow while doing this pass; it is a pure mechanical rename to keep the diff reviewable and the risk of introducing a logic bug near zero.
 
-- [ ] **Step 3: Rewrite the test harness in `matchRoom.test.ts`**
+- [ ] **Step 3: Delete the now-unrunnable test file**
 
-Replace lines 1–76 (imports through `makeJwt`) with:
-```ts
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { env, runInDurableObject } from "cloudflare:test";
-import { SignJWT } from "jose";
-import { encode, TABLE_SIZE, STARTING_STACK, legalActions, MATCH_FORMATS, DEFAULT_FORMAT, blindLevelAt, BOT_DECISION_DELAY_MIN_MS, BOT_DECISION_DELAY_MAX_MS } from "@poker/shared";
-import { csprngSeed, nextNonBustedSeat } from "./matchRoom.js";
-import type MatchRoom from "./matchRoom.js";
-import { botThinkDelayMs } from "./botRunner.js";
-import { TurnTimer } from "./timers.js";
-import type { Env } from "./env.js";
-import type { Connection } from "partyserver";
-
-function mockConn(id: string): Connection & { _msgs: string[]; _closed: boolean } {
-  const msgs: string[] = [];
-  return {
-    id,
-    _msgs: msgs,
-    _closed: false,
-    send(msg: string) { msgs.push(msg); },
-    close() { (this as { _closed: boolean })._closed = true; },
-  } as unknown as Connection & { _msgs: string[]; _closed: boolean };
-}
-
-/** Runs `fn` against a live MatchRoom DO, with env overridden per-test. */
-async function withRoom<T>(
-  envOverrides: Partial<Env>,
-  fn: (room: MatchRoom) => T | Promise<T>,
-): Promise<T> {
-  const id = env.MAIN.idFromName("test-room-" + Math.random());
-  const stub = env.MAIN.get(id);
-  return runInDurableObject(stub, async (instance) => {
-    Object.assign(instance.env, envOverrides);
-    return fn(instance);
-  });
-}
-
-async function makeJwt(sub: string, secret: string): Promise<string> {
-  const key = new TextEncoder().encode(secret);
-  return new SignJWT({ sub })
-    .setProtectedHeader({ alg: "HS256" })
-    .sign(key);
-}
+```bash
+git rm party/src/matchRoom.test.ts
 ```
 
-Then update every `describe`/`it` block: replace `const room = new MatchRoom(mockParty(...))` (and its variants with custom env/conns) with `await withRoom({...envOverrides}, async (room) => { ...existing assertions... })`. The `mockParty`/`MockConnectionList`/`makeConns` helpers are deleted entirely — `room.getConnections()` now comes from the real DO runtime's hibernatable connection registry, so tests that previously manually tracked a `MockConnectionList` instead call `room.onConnect(mockConn(...))` and let the DO track it internally (already how the majority of the 92 tests work per the excerpt read in Step 3 of investigation — they call `room.onConnect(conn)` directly, not through the mock party's connection list).
+This is the largest mechanical step in the whole migration (Step 2's substitution table applied across every method). Since there's no automated test to catch a missed spot, self-review by diffing against the original file is the acceptance gate here, not a test run — go through the substitution table in Step 2 method-by-method and confirm every non-substituted line is byte-identical to the original `party/src/matchRoom.ts`.
 
-This is the largest mechanical step in the whole migration (92 call sites). Do it in one pass with a careful find-and-replace, then rely on Step 4's full run to catch any missed spot — TypeScript will fail to compile on any remaining `mockParty`/`Party.` reference, which is the fast feedback loop here (not each test individually).
-
-- [ ] **Step 4: Run and verify**
+- [ ] **Step 4: Typecheck**
 
 ```
-npm test -- --project party
+npm run typecheck
 ```
-Expected: all 92 `matchRoom.test.ts` tests + 6 `lobby.test.ts` tests + 7 `auth.test.ts` + 7 `matchmaker.test.ts` pass (112 total in `party/`).
+Expected: passes, with zero remaining references to `partykit/server`, `Party.Request`, `Party.Connection`, or `this.party`. Grep to confirm:
+```
+grep -rn "partykit/server\|Party\.\|this\.party" party/src/matchRoom.ts party/src/lobby.ts
+```
+Expected: no output.
 
 - [ ] **Step 5: Full regression run**
 
 ```
 npm test
 ```
-Expected: 234 tests pass (same count as before this migration started — `auth.test.ts`/`matchmaker.test.ts` are pure functions with no PartyKit dependency and should need zero changes, confirming they weren't accidentally broken by the workspace-pool split).
+Expected: exactly 136 tests pass (234 total minus 92 for the deleted `matchRoom.test.ts` minus 6 for the deleted `lobby.test.ts`). `auth.test.ts`'s 7 and `matchmaker.test.ts`'s 7 tests are included in that 136 and must still be present and passing — confirm the test file list in the output still shows `party/src/auth.test.ts` and `party/src/matchmaker.test.ts`, and shows neither `lobby.test.ts` nor `matchRoom.test.ts`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add party/src/matchRoom.ts party/src/matchRoom.test.ts
+git add party/src/matchRoom.ts party/package.json
+git rm party/src/matchRoom.test.ts
 git commit -m "refactor(party): migrate MatchRoom from partykit to partyserver"
 ```
 
@@ -584,7 +432,7 @@ git commit -m "refactor(party): migrate MatchRoom from partykit to partyserver"
 
 **Files:**
 - Create: `party/src/worker.ts`
-- Modify: `party/wrangler.jsonc` (fill in the custom domain route; the bindings/migrations from Task 2 Step 2 stay as-is)
+- Create: `party/wrangler.jsonc` (Task 2's abandoned scaffold was deleted; this creates the real one from scratch)
 - Modify: `party/package.json` (remove `partykit`, finalize scripts)
 - Delete: `partykit.json`
 
@@ -610,7 +458,7 @@ export default {
 };
 ```
 
-- [ ] **Step 2: Finalize `party/wrangler.jsonc` with the real domain route**
+- [ ] **Step 2: Create `party/wrangler.jsonc` with the real domain route**
 
 ```jsonc
 {
@@ -652,10 +500,9 @@ export default {
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^4.1.0",
-    "@cloudflare/vitest-pool-workers": "latest",
+    "vitest": "^1.6.0",
     "@cloudflare/workers-types": "^4.0.0",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.0.0"
   }
 }
 ```
@@ -673,9 +520,103 @@ git rm partykit.json
 npm run typecheck
 npm test
 ```
-Expected: both green — this is the checkpoint proving nothing outside `party/` referenced `partykit.json` or the old `Party.*` types (grep the repo for `partykit/server` and `partykit.json` to confirm zero remaining references before moving on).
+Expected: both green, `npm test` showing exactly 136 tests (per Task 4's Global Constraint) — this is the checkpoint proving nothing outside `party/` referenced `partykit.json` or the old `Party.*` types. Grep to confirm:
+```
+grep -rln "partykit/server\|partykit.json" party/src client
+```
+Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: End-to-end local integration verification against `wrangler dev`**
+
+This is the real replacement for the 98 deleted unit tests — the first point in this migration where both `Lobby` and `MatchRoom` are assembled behind a real Worker entrypoint and can actually run. Do not skip this step or treat it as optional: it is the only verification this migration gets for `MatchRoom`'s reconnect/timebank/bust/ELO logic before production deploy.
+
+First confirm `.dev.vars` is git-ignored (it is not covered by the existing `.gitignore` yet):
+```bash
+grep -q '^\.dev\.vars$' .gitignore || echo '.dev.vars' >> .gitignore
+```
+Then create `party/.dev.vars` (local-only secrets file, read automatically by `wrangler dev`):
+```
+DEV_TOKENS=true
+```
+
+Start the dev server in the background:
+```bash
+cd party && npx wrangler dev
+```
+Expected startup log shows both bindings: `Durable Objects: MAIN -> MatchRoom, LOBBY -> Lobby` and a local URL (typically `http://localhost:8787`).
+
+Create a temporary verification script (scratch location, not committed — e.g. the session's scratchpad directory) using Node's built-in `WebSocket` (Node 22+, no `ws` package needed — confirmed working against the old `partykit dev` server earlier in this project's history):
+
+```js
+// verify-dev.mjs
+const LOBBY_URL = "ws://localhost:8787/parties/lobby/global";
+
+function connect(url) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    ws.onopen = () => resolve(ws);
+    ws.onerror = (e) => reject(e);
+  });
+}
+
+const lobby = await connect(LOBBY_URL);
+const messages = [];
+lobby.onmessage = (e) => messages.push(JSON.parse(e.data));
+
+lobby.send(JSON.stringify({ t: "hello", jwt: "dev:verify-player-1" }));
+lobby.send(JSON.stringify({ t: "enqueue", rating: 400, format: "turbo" }));
+
+// Poll for matchFound (bot-fill fires after BOT_FILL_WAIT_MS or immediately if
+// RANKED_MIN_ONLINE isn't met — see shared/src/constants.ts for the actual value).
+const deadline = Date.now() + 30_000;
+let matchFound;
+while (Date.now() < deadline && !matchFound) {
+  await new Promise((r) => setTimeout(r, 500));
+  matchFound = messages.find((m) => m.t === "matchFound");
+}
+if (!matchFound) {
+  console.error("FAIL: no matchFound within 30s. Messages so far:", messages);
+  process.exit(1);
+}
+console.log("PASS: matchmaking produced a room:", matchFound.roomId);
+
+const room = await connect(`ws://localhost:8787/parties/main/${matchFound.roomId}`);
+const roomMessages = [];
+room.onmessage = (e) => roomMessages.push(JSON.parse(e.data));
+room.send(JSON.stringify({ t: "hello", jwt: "dev:verify-player-1" }));
+
+// Wait for the table to fill (bots) and the first hand to start.
+const handDeadline = Date.now() + 15_000;
+let dealt;
+while (Date.now() < handDeadline && !dealt) {
+  await new Promise((r) => setTimeout(r, 500));
+  dealt = roomMessages.find((m) => m.t === "dealPrivate");
+}
+if (!dealt) {
+  console.error("FAIL: no dealPrivate within 15s. Messages so far:", roomMessages);
+  process.exit(1);
+}
+console.log("PASS: seated and dealt into a real hand, hole cards:", dealt.holeCards);
+
+const matchOverOrEvent = roomMessages.some((m) => m.t === "event" || m.t === "yourTurn");
+if (!matchOverOrEvent) {
+  console.error("FAIL: no event/yourTurn message observed after deal.");
+  process.exit(1);
+}
+console.log("PASS: table is live and broadcasting game state.");
+
+lobby.close();
+room.close();
+process.exit(0);
+```
+
+Run it: `node verify-dev.mjs`
+
+Expected output: three `PASS:` lines, exit code 0. This confirms, end to end: Lobby authentication + enqueue + matchmaking + room provisioning (the `getServerByName` cross-DO call from Task 3) works; MatchRoom authentication + seating + bot-fill + real hand dealing (the CSPRNG shuffle, `createHand`, hole-card dealing) works. It does not cover every one of the 98 deleted unit tests' edge cases (disconnect grace, timebank expiry, multi-hand bust sequencing, ELO settlement) — note this gap explicitly in your report; it is the accepted tradeoff from Revision Note 2, not something to silently expand this step to fully cover.
+
+Stop the `wrangler dev` process afterward.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add party/src/worker.ts party/wrangler.jsonc party/package.json package-lock.json
@@ -749,6 +690,6 @@ git commit -m "docs: PartyKit is live on party.pokerelo.us via partyserver/wrang
 ## Self-Review Notes
 
 - **Spec coverage:** Task 1 de-risks the Free-plan SQLite blocker before rewriting anything (the whole reason for this migration). Tasks 2–4 port the codebase and its tests. Task 5 replaces the platform config. Task 6 deploys, secures (`DEV_TOKENS` smoke test), and repoints the client. All six original requirements from the brief are covered.
-- **Known soft spot flagged inline:** Task 3 Step 3 calls out that one `lobby.test.ts` case (the "provisioning failed" throw-based test) cannot be mechanically ported as-is and needs a rewritten scenario (bad-body 400 instead of a thrown fetch) — this is real judgment a plan can't fully script in advance; the assigned engineer should treat it as a mini design decision, not a blind copy.
-- **Type consistency:** `Env` (Task 3 Step 1) is referenced identically across `lobby.ts`, `matchRoom.ts`, `worker.ts`, and both test files — same field names (`MAIN`, `LOBBY`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_TOKENS`) throughout.
-- **Risk called out, not hidden:** the Vitest 2→4 major-version bump (Task 2) is monorepo-wide even though only `party/` needs the new pool — Task 2 Step 5's `--project node` run is the explicit regression gate for that risk, and Task 4 Step 5's full 234-test run repeats it after the big rewrite lands.
+- **Type consistency:** `Env` (Task 3 Step 1) is referenced identically across `lobby.ts`, `matchRoom.ts`, and `worker.ts` — same field names (`MAIN`, `LOBBY`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_TOKENS`) throughout.
+- **Revised twice on 2026-07-12, in order:** (1) the original Task 2 (Vitest 2→4 bump + `@cloudflare/vitest-pool-workers`, "real simulated DO runtime" testing) was abandoned after a verified, unfixable internal crash across four version pinnings, including a release-date-matched pairing. (2) The first fallback considered — keep the existing plain-mock approach, just retyped — was *also* found impossible on direct testing: `partyserver`'s `Server` class imports Cloudflare's `cloudflare:workers` built-in at module load time, which crashes under plain Node regardless of mocking strategy. Final, user-confirmed architecture: delete `lobby.test.ts`/`matchRoom.test.ts` (98 tests) entirely; replace with one end-to-end `wrangler dev` integration script in Task 5 covering the golden path (matchmaking → room provisioning → seating → real hand dealt). This is a real, acknowledged reduction in regression coverage — the fine-grained edge cases those 98 tests covered (disconnect grace, timebank expiry, multi-hand bust sequencing, ELO settlement details) have no automated check after this migration. `auth.test.ts`/`matchmaker.test.ts` (14 tests, no `partykit`/`partyserver` dependency) are entirely unaffected.
+- **Verification shape changed accordingly:** Tasks 3 and 4 no longer have a live test run as their acceptance gate (there's nothing that can run yet) — they rely on `npm run typecheck` plus deliberate line-by-line diff review against the original files. The `wrangler dev` script in Task 5 Step 6 is the first and only point where the ported code actually executes before production deploy — treat it as load-bearing, not optional.

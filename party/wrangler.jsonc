@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pokerelo-party",
+  "main": "src/worker.ts",
+  "compatibility_date": "2024-11-01",
+  "routes": [
+    { "pattern": "party.pokerelo.us", "custom_domain": true }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MAIN", "class_name": "MatchRoom" },
+      { "name": "LOBBY", "class_name": "Lobby" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MatchRoom", "Lobby"] }
+  ]
+}

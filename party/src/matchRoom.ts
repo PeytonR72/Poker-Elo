@@ -1,4 +1,5 @@
-import type * as Party from "partykit/server";
+import { Server } from "partyserver";
+import type { Connection } from "partyserver";
 import {
   encode,
   decode,
@@ -29,6 +30,7 @@ import type { TableState, PublicView, Action, ActionMask, Seat, EloPlayer } from
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { TurnTimer } from "./timers.js";
 import { decideBotAction, botThinkDelayMs } from "./botRunner.js";
+import type { Env } from "./env.js";
 
 /** UX pause between hands — not a poker-numeric rule, so defined locally. */
 const INTER_HAND_PAUSE_MS = 3_000;
@@ -78,8 +80,8 @@ function csprngSeed(): number {
   return (buf[0]! ^ buf[1]! ^ buf[2]! ^ buf[3]!) >>> 0;
 }
 
-export default class MatchRoom implements Party.Server {
-  static options = { hibernate: false } satisfies Party.ServerOptions;
+export default class MatchRoom extends Server<Env> {
+  static override options = { hibernate: false };
 
   // In-memory state — ephemeral per room instance
   private players = new Map<string, ConnState>(); // conn.id → ConnState
@@ -101,9 +103,9 @@ export default class MatchRoom implements Party.Server {
   private expectedHumanIds: Set<string> = new Set();
   private connectGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(readonly party: Party.Party) {}
+  // No constructor — Server<Env> supplies this.ctx / this.env / this.name.
 
-  async onRequest(req: Party.Request): Promise<Response> {
+  override async onRequest(req: Request): Promise<Response> {
     if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     if (this.provisioned || this.tableState !== null) return new Response("OK"); // idempotent
     let body: { format?: unknown; humanIds?: unknown };
@@ -134,11 +136,11 @@ export default class MatchRoom implements Party.Server {
     return new Response("OK");
   }
 
-  onConnect(conn: Party.Connection): void {
+  override onConnect(conn: Connection): void {
     this.players.set(conn.id, { playerId: "", seatIndex: null, authed: false, timebankMs: 0 });
   }
 
-  onClose(conn: Party.Connection): void {
+  override onClose(conn: Connection): void {
     const connState = this.players.get(conn.id);
     if (connState?.authed && connState.playerId) {
       const { playerId, seatIndex } = connState;
@@ -153,7 +155,7 @@ export default class MatchRoom implements Party.Server {
     this.players.delete(conn.id);
   }
 
-  onError(conn: Party.Connection, _error: Error): void {
+  override onError(conn: Connection, _error: Error): void {
     conn.close();
     // onClose will fire after close(), starting the grace timer for authed players.
     // If PartyKit does NOT fire onClose after onError, we need to handle it here too.
@@ -171,7 +173,7 @@ export default class MatchRoom implements Party.Server {
     this.players.delete(conn.id);
   }
 
-  async onMessage(raw: string | ArrayBuffer, sender: Party.Connection): Promise<void> {
+  override async onMessage(sender: Connection, raw: string | ArrayBuffer): Promise<void> {
     // Decode — throws if not valid JSON with a t field
     let msg: { t: string; jwt?: string };
     try {
@@ -182,8 +184,8 @@ export default class MatchRoom implements Party.Server {
       return;
     }
 
-    const isDev = !this.party.env["SUPABASE_JWT_SECRET"] ||
-      this.party.env["SUPABASE_JWT_SECRET"] === "";
+    const isDev = !this.env.SUPABASE_JWT_SECRET ||
+      this.env.SUPABASE_JWT_SECRET === "";
 
     // Dev-only: allow a "startMatch" trigger without filling the table
     if (msg.t === "startMatch" && isDev) {
@@ -235,7 +237,7 @@ export default class MatchRoom implements Party.Server {
 
       // Broadcast events then snapshots
       for (const event of events) {
-        this.party.broadcast(encode({ t: "event", event }));
+        this.broadcast(encode({ t: "event", event }));
       }
       this.broadcastSnapshots();
 
@@ -269,8 +271,8 @@ export default class MatchRoom implements Party.Server {
     }
 
     // Auth
-    const jwtSecret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
-    const devTokensEnabled = this.party.env["DEV_TOKENS"] === "true";
+    const jwtSecret = this.env.SUPABASE_JWT_SECRET;
+    const devTokensEnabled = this.env.DEV_TOKENS === "true";
     let playerId: string;
     try {
       // Always try parseDevToken first if token starts with "dev:"
@@ -283,9 +285,9 @@ export default class MatchRoom implements Party.Server {
           throw new Error("dev: tokens not allowed in production");
         }
       } else {
-        // Otherwise verify as JWT
-        if (!jwtSecret) throw new Error("No JWT secret configured");
-        const auth = await verifyJwt(jwt, jwtSecret);
+        // Otherwise verify as JWT — via shared secret (legacy HS256 projects) or
+        // JWKS (newer ES256 projects); verifyJwt dispatches on the token's own alg.
+        const auth = await verifyJwt(jwt, { secret: jwtSecret, supabaseUrl: this.env.SUPABASE_URL });
         playerId = auth.sub;
       }
     } catch {
@@ -442,7 +444,7 @@ export default class MatchRoom implements Party.Server {
     this.broadcastSnapshots();
     this.sendDealPrivate();
     this.sendYourTurn();
-    this.party.broadcast(encode({
+    this.broadcast(encode({
       t: "matchInfo",
       format: formatId,
       matchStartMs: this.matchStartMs,
@@ -456,7 +458,7 @@ export default class MatchRoom implements Party.Server {
     for (const [connId, connState] of this.players) {
       if (!connState.authed) continue;
       const view: PublicView = redactFor(connState.playerId, this.tableState);
-      const found = [...this.party.getConnections()].find((c) => c.id === connId);
+      const found = [...this.getConnections()].find((c) => c.id === connId);
       found?.send(encode({ t: "snapshot", view }));
     }
   }
@@ -468,7 +470,7 @@ export default class MatchRoom implements Party.Server {
       if (!connState.authed || connState.seatIndex === null) continue;
       const seat = this.tableState.seats[connState.seatIndex];
       if (!seat?.holeCards) continue;
-      const conn = [...this.party.getConnections()].find((c) => c.id === connId);
+      const conn = [...this.getConnections()].find((c) => c.id === connId);
       conn?.send(encode({ t: "dealPrivate", holeCards: seat.holeCards }));
     }
   }
@@ -496,7 +498,7 @@ export default class MatchRoom implements Party.Server {
     const mask = legalActions(this.tableState, seatIdx);
 
     // Find the connection for this seat and send yourTurn
-    for (const c of this.party.getConnections()) {
+    for (const c of this.getConnections()) {
       if (this.players.get(c.id)?.seatIndex === seatIdx) {
         c.send(encode({ t: "yourTurn", mask, deadlineTs }));
         break;
@@ -520,7 +522,7 @@ export default class MatchRoom implements Party.Server {
     const action = decideBotAction(view, seat.holeCards, mask, rng);
     const { state, events } = applyAction(this.tableState, action);
     this.tableState = state;
-    for (const event of events) this.party.broadcast(encode({ t: "event", event }));
+    for (const event of events) this.broadcast(encode({ t: "event", event }));
     this.broadcastSnapshots();
     if (this.tableState.street === "complete") {
       this.onHandComplete();
@@ -541,7 +543,7 @@ export default class MatchRoom implements Party.Server {
       connState.timebankMs -= ext;
       this.timebankUsedThisTurn = true;
       // Notify the player that their timebank is being used
-      for (const c of this.party.getConnections()) {
+      for (const c of this.getConnections()) {
         if (this.players.get(c.id)?.seatIndex === seatIdx) {
           c.send(encode({ t: "timebankUsed", seatIdx, remainingMs: connState.timebankMs }));
           break;
@@ -561,7 +563,7 @@ export default class MatchRoom implements Party.Server {
     this.tableState = state;
 
     for (const event of events) {
-      this.party.broadcast(encode({ t: "event", event }));
+      this.broadcast(encode({ t: "event", event }));
     }
     this.broadcastSnapshots();
 
@@ -594,7 +596,7 @@ export default class MatchRoom implements Party.Server {
       const { state, events } = applyAction(this.tableState, action);
       this.tableState = state;
       for (const event of events) {
-        this.party.broadcast(encode({ t: "event", event }));
+        this.broadcast(encode({ t: "event", event }));
       }
     }
 
@@ -723,16 +725,16 @@ export default class MatchRoom implements Party.Server {
       }
     }
 
-    this.party.broadcast(encode({
+    this.broadcast(encode({
       t: "matchOver",
       finishPlaceById,
       eloDeltas: deltas,
     }));
 
-    const supabaseUrl = this.party.env["SUPABASE_URL"] as string | undefined;
-    const serviceKey = this.party.env["SUPABASE_SERVICE_ROLE_KEY"] as string | undefined;
-    const isDev = !this.party.env["SUPABASE_JWT_SECRET"] ||
-      this.party.env["SUPABASE_JWT_SECRET"] === "";
+    const supabaseUrl = this.env.SUPABASE_URL;
+    const serviceKey = this.env.SUPABASE_SERVICE_ROLE_KEY;
+    const isDev = !this.env.SUPABASE_JWT_SECRET ||
+      this.env.SUPABASE_JWT_SECRET === "";
 
     if (!isDev && supabaseUrl && serviceKey) {
       void fetch(`${supabaseUrl}/functions/v1/report-match`, {
@@ -742,7 +744,7 @@ export default class MatchRoom implements Party.Server {
           "Authorization": `Bearer ${serviceKey}`,
         },
         body: JSON.stringify({
-          roomId: this.party.id,
+          roomId: this.name,
           format: this.tableState.format,
           finishPlaceById: humanFinishPlaces,
           eloDeltas: humanEloDeltas,

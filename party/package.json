@@ -3,13 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
   "dependencies": {
     "@poker/shared": "*",
     "jose": "^5.0.0",
-    "partykit": "^0.0.108"
+    "partyserver": "^0.0.66"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "wrangler": "^4.0.0"
   }
 }

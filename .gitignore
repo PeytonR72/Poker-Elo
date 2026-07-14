@@ -15,3 +15,5 @@ dist/
 .partykit/
 .playwright-mcp/
 .superpowers/
+.dev.vars
+.wrangler/

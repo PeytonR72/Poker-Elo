@@ -3,8 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["ES2022", "DOM"],
-    "types": ["vitest/globals"]
+    "lib": ["ES2022"],
+    "types": ["vitest/globals", "@cloudflare/workers-types"]
   },
   "include": ["src"],
   "references": [{ "path": "../shared" }]

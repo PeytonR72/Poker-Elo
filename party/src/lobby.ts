@@ -1,4 +1,5 @@
-import type * as Party from "partykit/server";
+import { Server, getServerByName } from "partyserver";
+import type { Connection } from "partyserver";
 import {
   encode,
   decode,
@@ -10,30 +11,29 @@ import {
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { formMatches, botFillEtaSec } from "./matchmaker.js";
 import type { Waiter } from "./matchmaker.js";
+import type { Env } from "./env.js";
 
 type ConnState = { playerId: string; authed: boolean };
 
-export default class Lobby implements Party.Server {
-  static options = { hibernate: false } satisfies Party.ServerOptions;
+export default class Lobby extends Server<Env> {
+  static override options = { hibernate: false };
 
   private conns = new Map<string, ConnState>(); // conn.id → state
   private waiters = new Map<string, Waiter & { connId: string }>(); // playerId → waiter
   private ticker: ReturnType<typeof setInterval> | null = null;
 
-  constructor(readonly party: Party.Party) {}
-
-  onConnect(conn: Party.Connection): void {
+  override onConnect(conn: Connection): void {
     this.conns.set(conn.id, { playerId: "", authed: false });
   }
 
-  onClose(conn: Party.Connection): void {
+  override onClose(conn: Connection): void {
     const state = this.conns.get(conn.id);
     if (state?.playerId) this.waiters.delete(state.playerId);
     this.conns.delete(conn.id);
     if (this.waiters.size === 0) this.stopTicker();
   }
 
-  async onMessage(raw: string | ArrayBuffer, sender: Party.Connection): Promise<void> {
+  override async onMessage(sender: Connection, raw: string | ArrayBuffer): Promise<void> {
     let msg: { t: string; jwt?: string; rating?: number; format?: string };
     try {
       msg = decode(raw as string);
@@ -93,8 +93,8 @@ export default class Lobby implements Party.Server {
 
   private async authenticate(jwt: string | undefined): Promise<string | null> {
     if (typeof jwt !== "string") return null;
-    const secret = this.party.env["SUPABASE_JWT_SECRET"] as string | undefined;
-    const devTokensEnabled = this.party.env["DEV_TOKENS"] === "true";
+    const secret = this.env.SUPABASE_JWT_SECRET;
+    const devTokensEnabled = this.env.DEV_TOKENS === "true";
     try {
       // Always try parseDevToken first if token starts with "dev:"
       if (jwt.startsWith("dev:")) {
@@ -105,9 +105,9 @@ export default class Lobby implements Party.Server {
         // dev: tokens not allowed in production
         return null;
       }
-      // Otherwise verify as JWT
-      if (!secret) return null;
-      const auth = await verifyJwt(jwt, secret);
+      // Otherwise verify as JWT — via shared secret (legacy HS256 projects) or
+      // JWKS (newer ES256 projects); verifyJwt dispatches on the token's own alg.
+      const auth = await verifyJwt(jwt, { secret, supabaseUrl: this.env.SUPABASE_URL });
       return auth.sub;
     } catch {
       return null;
@@ -138,7 +138,18 @@ export default class Lobby implements Party.Server {
       const roomId = makeRoomCode(MATCH_CODE_LENGTH, Math.random);
       let res: Response;
       try {
-        res = await this.party.context.parties["main"]!.get(roomId).fetch({
+        // getServerByName's return type structurally requires every RPC-typed member of
+        // Server<MatchRoom> (onRequest's Response, getConnection's WebSocket Stub, etc.) to
+        // match @cloudflare/workers-types' ambient-global vs. explicitly-imported forms
+        // exactly — a package-internal type-design split that collides across the whole
+        // Server surface, not one property. MatchRoom does satisfy Server<Env> at runtime
+        // (Task 1 proved a real wrangler deploy works); this is a type-level-only mismatch.
+        // We only ever call `.fetch()` on the returned stub, so narrow to that alone rather
+        // than fighting the full generic surface.
+        const stub = (await getServerByName(this.env.MAIN as never, roomId)) as unknown as {
+          fetch: typeof fetch;
+        };
+        res = await stub.fetch("https://internal/provision", {
           method: "POST",
           body: JSON.stringify({ format: match.format, humanIds: match.humanIds }),
         });
@@ -181,7 +192,7 @@ export default class Lobby implements Party.Server {
   }
 
   private sendTo(connId: string, msg: Parameters<typeof encode>[0]): void {
-    for (const c of this.party.getConnections()) {
+    for (const c of this.getConnections()) {
       if (c.id === connId) {
         c.send(encode(msg));
         return;
