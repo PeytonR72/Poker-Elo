@@ -1,15 +1,22 @@
-import type React from "react";
 import { useState, useEffect } from "react";
+import { motion } from "motion/react";
 import type { ActionMask } from "@poker/shared";
-import { maskToButtons, clampRaiseTo, formatChips, quickRaiseOptions } from "./viewHelpers.js";
+import { Button } from "../components/ui/button.js";
+import { Slider } from "../components/ui/slider.js";
+import { maskToButtons, clampRaiseTo, formatChips } from "./viewHelpers.js";
+import { potPresets } from "./potPresets.js";
 
 export default function ActionBar({
   mask,
   currentBet,
+  potTotal,
+  bb,
   onAction,
 }: {
   mask: ActionMask;
   currentBet: number;
+  potTotal: number;
+  bb: number;
   onAction: (action: "fold" | "check" | "call" | "raise", amount?: number) => void;
 }) {
   const b = maskToButtons(mask);
@@ -19,41 +26,90 @@ export default function ActionBar({
     setRaiseTo(mask.minRaiseTo);
   }, [mask]);
 
-  const quickRaises = quickRaiseOptions(mask, currentBet);
+  const presets = potPresets(mask, potTotal, currentBet);
+
+  function step(delta: number) {
+    setRaiseTo((v) => clampRaiseTo(v + delta, mask));
+  }
 
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", padding: 12, flexWrap: "wrap" }}>
-      {b.fold && <button onClick={() => onAction("fold")} style={btn("#7a2d2d")}>Fold</button>}
-      {b.check && <button onClick={() => onAction("check")} style={btn("#2d5d7a")}>Check</button>}
-      {b.call && <button onClick={() => onAction("call", b.callAmount)} style={btn("#2d5d7a")}>Call {formatChips(b.callAmount)}</button>}
+    <motion.div
+      initial={{ y: 24, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+      className="flex items-end gap-4 border-t border-edge bg-surface/95 px-4 py-3 backdrop-blur"
+    >
       {b.raise && (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {quickRaises.map((q) => (
-            <button
-              key={q.label}
-              onClick={() => onAction("raise", q.raiseTo)}
-              style={btn("#3d3560")}
-              title={`Raise to ${formatChips(q.raiseTo)}`}
+        <div className="flex flex-1 flex-col gap-2">
+          <div className="flex items-center justify-between text-xs text-neutral-400">
+            <span>Raise Amount</span>
+            <span className="font-mono-num text-neutral-200">{formatChips(raiseTo)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              onClick={() => step(-bb)}
+              aria-label="Decrease raise"
             >
-              {q.label}
-            </button>
-          ))}
-          <input
-            type="range"
-            min={mask.minRaiseTo}
-            max={mask.maxRaiseTo}
-            value={raiseTo}
-            onChange={(e) => setRaiseTo(clampRaiseTo(Number(e.target.value), mask))}
-          />
-          <button onClick={() => onAction("raise", clampRaiseTo(raiseTo, mask))} style={btn("#2d7d46")}>
-            Raise to {formatChips(raiseTo)}
-          </button>
-        </span>
+              −
+            </Button>
+            <Slider
+              min={mask.minRaiseTo}
+              max={mask.maxRaiseTo}
+              value={[raiseTo]}
+              onValueChange={([v]) => setRaiseTo(clampRaiseTo(v ?? mask.minRaiseTo, mask))}
+              className="flex-1"
+            />
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              onClick={() => step(bb)}
+              aria-label="Increase raise"
+            >
+              +
+            </Button>
+          </div>
+          <div className="flex gap-1.5">
+            {presets.map((p) => (
+              <Button
+                key={p.label}
+                variant="secondary"
+                size="sm"
+                onClick={() => setRaiseTo(p.raiseTo)}
+                title={`Raise to ${formatChips(p.raiseTo)}`}
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+        </div>
       )}
-    </div>
+      <div className="flex items-center gap-2">
+        {b.fold && (
+          <Button variant="outline" className="border-danger text-danger hover:bg-danger/10" onClick={() => onAction("fold")}>
+            Fold
+          </Button>
+        )}
+        {b.check && (
+          <Button variant="secondary" onClick={() => onAction("check")}>
+            Check
+          </Button>
+        )}
+        {b.call && (
+          <Button variant="secondary" onClick={() => onAction("call", b.callAmount)}>
+            Call {formatChips(b.callAmount)}
+          </Button>
+        )}
+        {b.raise && (
+          <Button
+            className="bg-emerald text-neutral-900 shadow-[0_0_16px_rgba(47,217,135,0.5)] hover:bg-emerald-hover"
+            onClick={() => onAction("raise", clampRaiseTo(raiseTo, mask))}
+          >
+            Raise / To {formatChips(raiseTo)}
+          </Button>
+        )}
+      </div>
+    </motion.div>
   );
-}
-
-function btn(bg: string): React.CSSProperties {
-  return { padding: "10px 16px", background: bg, color: "white", border: 0, borderRadius: 6 };
 }
