@@ -133,6 +133,11 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
   `client/tsconfig.json` is composite, emits to `.tsbuild` (gitignored), referenced by root `tsc -b`.
 - Run the client: `npm run dev` (inside `client/`); env via `client/.env` (see `.env.example`).
 - Pure shaping cores live in `client/src/data/` (tested); hooks do Supabase I/O; components are thin. Usernames come from `profiles.username` (added in `20260625000001_usernames.sql`, seeded by the `handle_new_user` trigger from signup metadata).
+- Styling is Tailwind v4 design tokens (`client/src/index.css` `@theme`/`@theme inline`) + shadcn/ui
+  (`client/src/components/ui/`, `@/` alias sanctioned only inside `components/` and `lib/utils.ts`)
+  + `motion` (Framer Motion) for animation, with the app root wrapped in
+  `<MotionConfig reducedMotion="user">` (`client/src/main.tsx`) so `prefers-reduced-motion` degrades
+  animations to instant transitions.
 
 ## Commands
 

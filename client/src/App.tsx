@@ -9,7 +9,7 @@ export default function App() {
   const [match, setMatch] = useState<{ roomId: string; format: string } | null>(null);
   const [ratingRefreshKey, setRatingRefreshKey] = useState(0);
 
-  if (auth.loading) return <div style={{ padding: 24 }}>Loading…</div>;
+  if (auth.loading) return <div className="grid h-screen place-items-center bg-base p-6 text-neutral-400">Loading…</div>;
   if (!auth.session) return <AuthScreen auth={auth} />;
 
   if (match) {
