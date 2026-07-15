@@ -58,13 +58,3 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
   --color-destructive: var(--destructive);
   --radius-lg: var(--radius);
 }
-
-@keyframes seatActionPop {
-  from { transform: translateX(-50%) scale(1.4); opacity: 0; }
-  to { transform: translateX(-50%) scale(1); opacity: 1; }
-}
-
-@keyframes seatWinnerGlow {
-  0%, 100% { box-shadow: 0 0 12px 2px rgba(255, 215, 0, 0.6); }
-  50% { box-shadow: 0 0 22px 6px rgba(255, 215, 0, 0.95); }
-}

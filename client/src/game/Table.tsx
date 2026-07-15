@@ -1,5 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import type { MatchUiState } from "./matchReducer.js";
 import SeatView from "./SeatView.js";
 import Board from "./Board.js";
@@ -9,14 +10,14 @@ import { positionLabel } from "./viewHelpers.js";
 const WINNER_GLOW_MS = 2_500;
 const WINNER_GLOW_MS_SHOWDOWN = 6_000;
 
-// Six fixed positions around an oval (own seat forced to the bottom-center by rotation).
+// Six fixed positions around an oval (own seat forced to bottom-center by rotation).
 const POSITIONS: Array<React.CSSProperties> = [
-  { left: "50%", bottom: "2%", transform: "translateX(-50%)" },
-  { left: "8%", bottom: "22%" },
-  { left: "8%", top: "22%" },
-  { left: "50%", top: "2%", transform: "translateX(-50%)" },
-  { right: "8%", top: "22%" },
-  { right: "8%", bottom: "22%" },
+  { left: "50%", top: "88%", transform: "translate(-50%, -50%)" },
+  { left: "18%", top: "75%", transform: "translate(-50%, -50%)" },
+  { left: "6%", top: "40%", transform: "translate(-50%, -50%)" },
+  { left: "35%", top: "8%", transform: "translate(-50%, -50%)" },
+  { left: "65%", top: "8%", transform: "translate(-50%, -50%)" },
+  { left: "94%", top: "40%", transform: "translate(-50%, -50%)" },
 ];
 
 export default function Table({ state }: { state: MatchUiState }) {
@@ -48,34 +49,49 @@ export default function Table({ state }: { state: MatchUiState }) {
     lastHandNumber.current = hn;
   }, [view?.handNumber]);
 
-  if (!view) return <p style={{ textAlign: "center" }}>Waiting for the table…</p>;
+  if (!view) return <p className="text-center text-neutral-400">Waiting for the table…</p>;
   const n = view.seats.length;
   const own = state.ownSeat ?? 0;
   // view.pots is only ever populated transiently inside settleShowdown/awardSingleWinner
   // (reset to [] immediately after distributing chips), so every snapshot we actually
   // receive has pots === []. The live pot during a hand is each seat's total contribution.
   const pot = view.seats.reduce((sum, s) => sum + (s?.committedTotal ?? 0), 0);
+  const streetCommitted = view.seats.reduce((sum, s) => sum + (s?.committedThisStreet ?? 0), 0);
 
   return (
-    <div style={{ position: "relative", width: "min(900px, 95vw)", height: 520, margin: "0 auto" }}>
-      <div style={{
-        position: "absolute", inset: "12% 6%", borderRadius: "50%",
-        background: "radial-gradient(ellipse at center, #1f7a4d, #0f5132)",
-        border: "10px solid #5b3a1e",
-      }} />
-      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Board board={view.board} pot={pot} />
+    <div className="relative mx-auto h-[520px] w-[min(900px,95vw)]">
+      <div className="absolute inset-[12%_6%] rounded-[50%] border border-emerald/15 bg-[radial-gradient(ellipse_at_center,#0d3326,#071a13)] shadow-[inset_0_0_80px_rgba(0,0,0,0.55)]" />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <Board board={view.board} pot={pot} handNumber={view.handNumber} />
       </div>
+      {/* Slide target: once a street's commits have been swept into the pot (all seats
+          back to 0 committedThisStreet, but the pot itself is nonzero), each seat's commit
+          pill's shared layoutId re-parents here so Motion animates the "collect to pot"
+          flight instead of just vanishing. */}
+      {streetCommitted === 0 &&
+        pot > 0 &&
+        view.seats.map((seat, i) =>
+          seat && seat.committedTotal > 0 ? (
+            <motion.div
+              key={`pot-collect-${i}`}
+              layoutId={`commit-${i}`}
+              transition={{ type: "spring", stiffness: 260, damping: 24 }}
+              className="pointer-events-none absolute top-1/2 left-1/2 h-0 w-0 -translate-x-1/2 -translate-y-1/2"
+            />
+          ) : null,
+        )}
       {view.seats.map((seat, i) => {
         // Rotate so our seat sits at POSITIONS[0] (bottom-center).
         const slot = (i - own + n) % n;
         const pos = POSITIONS[slot] ?? POSITIONS[0]!;
         return (
-          <div key={i} style={{ position: "absolute", ...pos }}>
+          <div key={i} className="absolute" style={pos}>
             <SeatView
               seat={seat}
+              seatIndex={i}
               isOwn={i === state.ownSeat}
               isToAct={view.toAct === i}
+              isDealer={view.buttonIndex === i}
               ownHole={state.ownHole}
               lastAction={state.actionBySeat[i]}
               position={positionLabel(i, view.buttonIndex)}

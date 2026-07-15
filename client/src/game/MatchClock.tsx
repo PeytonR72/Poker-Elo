@@ -23,9 +23,13 @@ export default function MatchClock({
   const mm = Math.floor(remainingMs / 60000);
   const ss = Math.floor((remainingMs % 60000) / 1000);
   return (
-    <div style={{ textAlign: "center", fontSize: 14 }}>
-      <span style={{ marginRight: 12 }}>⏱ {mm}:{String(ss).padStart(2, "0")}</span>
-      <span>{blindLevelLabel(sb, bb, format)} ({sb}/{bb})</span>
+    <div className="flex items-center gap-2 font-mono-num text-sm text-neutral-300">
+      <span>
+        ⏱ {mm}:{String(ss).padStart(2, "0")}
+      </span>
+      <span className="text-neutral-500">
+        {blindLevelLabel(sb, bb, format)} ({sb}/{bb})
+      </span>
     </div>
   );
 }
