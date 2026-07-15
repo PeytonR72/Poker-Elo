@@ -8,6 +8,7 @@ import RatingBadge from "../home/RatingBadge.js";
 import { Button } from "../components/ui/button.js";
 import { Card } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
+import StatCard from "../components/stat-card.js";
 import { RANK_TIERS, rankForRating } from "@poker/shared";
 
 export default function ProfileScreen({
@@ -73,32 +74,14 @@ export default function ProfileScreen({
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">RATING</span>
-          <span className="font-mono-num text-2xl">{header.rating}</span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">GAMES</span>
-          <span className="font-mono-num text-2xl">{header.gamesPlayed}</span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">WINS</span>
-          <span className="font-mono-num text-2xl">{header.firstPlaceCount}</span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
-            BEST FINISH
-          </span>
-          <span className="font-mono-num text-2xl">
-            {header.bestFinish != null ? `#${header.bestFinish}` : "—"}
-          </span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
-            AVG FINISH
-          </span>
-          <span className="font-mono-num text-2xl">{avgFinish != null ? avgFinish.toFixed(1) : "—"}</span>
-        </Card>
+        <StatCard label="RATING" value={header.rating} />
+        <StatCard label="GAMES" value={header.gamesPlayed} />
+        <StatCard label="WINS" value={header.firstPlaceCount} />
+        <StatCard
+          label="BEST FINISH"
+          value={header.bestFinish != null ? `#${header.bestFinish}` : "—"}
+        />
+        <StatCard label="AVG FINISH" value={avgFinish != null ? avgFinish.toFixed(1) : "—"} />
       </div>
 
       <div className="flex flex-col gap-3">

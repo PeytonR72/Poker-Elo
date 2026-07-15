@@ -8,6 +8,7 @@ import Logo from "../shell/Logo.js";
 import { Card } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
 import { Badge } from "../components/ui/badge.js";
+import StatCard from "../components/stat-card.js";
 
 export default function LobbyScreen({
   auth,
@@ -117,26 +118,9 @@ export default function LobbyScreen({
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
-            RATING
-          </span>
-          <span className="font-mono-num text-2xl">{rating}</span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
-            RANK
-          </span>
-          <span className="font-mono-num text-2xl">{rankForRating(rating)}</span>
-        </Card>
-        <Card className="gap-1 p-4">
-          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
-            QUEUE
-          </span>
-          <span className="font-mono-num text-2xl">
-            {queued ? `~${state.etaSec}s` : "Idle"}
-          </span>
-        </Card>
+        <StatCard label="RATING" value={rating} />
+        <StatCard label="RANK" value={rankForRating(rating)} />
+        <StatCard label="QUEUE" value={queued ? `~${state.etaSec}s` : "Idle"} />
       </div>
     </div>
   );
