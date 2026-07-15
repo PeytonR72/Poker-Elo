@@ -30,6 +30,8 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
   --secondary-foreground: #e6e6e6;
   --muted: var(--color-surface-2);
   --muted-foreground: #8b92a5;
+  --accent: var(--color-surface-2);
+  --accent-foreground: #e6e6e6;
   --border: var(--color-edge);
   --input: var(--color-edge);
   --ring: var(--color-emerald);
