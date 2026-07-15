@@ -1,8 +1,13 @@
-import { useEffect } from "react";
-import { MATCH_FORMATS, DEFAULT_FORMAT } from "@poker/shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { motion } from "motion/react";
+import { MATCH_FORMATS, DEFAULT_FORMAT, rankForRating } from "@poker/shared";
 import type { SessionApi } from "../auth/useSession.js";
 import { useLobbySocket } from "./useLobbySocket.js";
+import RatingBadge from "../home/RatingBadge.js";
+import Logo from "../shell/Logo.js";
+import { Card } from "../components/ui/card.js";
+import { Button } from "../components/ui/button.js";
+import { Badge } from "../components/ui/badge.js";
 
 export default function LobbyScreen({
   auth,
@@ -16,6 +21,7 @@ export default function LobbyScreen({
   const { state, connStatus, enqueue, leave } = useLobbySocket(auth.getJwt);
   const [format, setFormat] = useState<string>(DEFAULT_FORMAT);
   const connected = connStatus === "open";
+  const queued = state.status === "queued";
 
   useEffect(() => {
     if (state.status === "matched" && state.match) {
@@ -23,40 +29,115 @@ export default function LobbyScreen({
     }
   }, [state.status, state.match, onMatchFound]);
 
+  const activeFormat = MATCH_FORMATS[format];
+
   return (
-    <div>
-      {state.status !== "queued" ? (
-        <>
-          <label style={{ display: "block", margin: "12px 0" }}>
-            Format:{" "}
-            <select value={format} onChange={(e) => setFormat(e.target.value)}>
-              {Object.values(MATCH_FORMATS).map((f) => (
-                <option key={f.id} value={f.id}>{f.label}</option>
-              ))}
-            </select>
-          </label>
-          <button onClick={() => enqueue(rating, format)} disabled={!connected}
-            style={{ padding: "10px 20px", background: connected ? "#2d7d46" : "#3a3f4a",
-              color: "white", border: 0, borderRadius: 6, cursor: connected ? "pointer" : "not-allowed" }}>
-            Find Match
-          </button>
-          {connStatus === "connecting" && (
-            <p style={{ color: "#8b92a5" }}>Connecting to game server…</p>
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Arena</h1>
+        <RatingBadge rating={rating} />
+      </div>
+
+      <Card className="mx-auto w-full max-w-md items-center gap-5 p-8 text-center">
+        <div className="relative mx-auto h-20 w-20">
+          {queued && (
+            <motion.span
+              className="absolute inset-0 rounded-full border-2 border-emerald"
+              animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+            />
           )}
-          {connStatus === "closed" && (
-            <p style={{ color: "#ff6b6b" }}>
-              Can't reach the game server — matchmaking is unavailable. Retrying…
-            </p>
-          )}
-        </>
-      ) : (
-        <div>
-          <p>In queue — position {state.position} of {state.waiting}.</p>
-          <p>Filling with bots in ~{state.etaSec}s if no humans join.</p>
-          <button onClick={leave} style={{ padding: "8px 16px" }}>Cancel</button>
+          <span className="absolute inset-3 grid place-items-center rounded-full border border-edge bg-surface-2">
+            <Logo size={28} />
+          </span>
         </div>
-      )}
-      {state.error && <p style={{ color: "#ff6b6b" }}>{state.error}</p>}
+
+        <div>
+          <h2 className="text-lg font-semibold">
+            {queued ? "Searching for match…" : "Ready to play"}
+          </h2>
+        </div>
+
+        {connStatus === "connecting" && (
+          <p className="text-sm text-muted-foreground">Connecting to game server…</p>
+        )}
+        {connStatus === "closed" && (
+          <p className="text-sm text-danger">
+            Can't reach the game server — matchmaking is unavailable. Retrying…
+          </p>
+        )}
+
+        {!queued ? (
+          <>
+            <div className="flex flex-wrap justify-center gap-2">
+              {Object.values(MATCH_FORMATS).map((f) => (
+                <Badge
+                  key={f.id}
+                  variant={f.id === format ? "default" : "outline"}
+                  onClick={() => setFormat(f.id)}
+                  className={f.id === format ? "cursor-pointer" : "cursor-pointer text-muted-foreground"}
+                >
+                  {f.label}
+                </Badge>
+              ))}
+            </div>
+
+            <Button
+              size="lg"
+              disabled={!connected}
+              onClick={() => enqueue(rating, format)}
+              className="w-full font-semibold shadow-[0_0_18px_rgba(47,217,135,0.45)]"
+            >
+              Find Match
+              {activeFormat && (
+                <Badge variant="secondary" className="ml-1">
+                  6-Max No-Limit · {activeFormat.label}
+                </Badge>
+              )}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              In queue — position {state.position} of {state.waiting}.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Filling with bots in ~{state.etaSec}s if no humans join.
+            </p>
+            <button
+              onClick={leave}
+              className="text-sm text-neutral-400 hover:text-danger"
+            >
+              Cancel Search
+            </button>
+          </>
+        )}
+
+        {state.error && <p className="text-sm text-danger">{state.error}</p>}
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Card className="gap-1 p-4">
+          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
+            RATING
+          </span>
+          <span className="font-mono-num text-2xl">{rating}</span>
+        </Card>
+        <Card className="gap-1 p-4">
+          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
+            RANK
+          </span>
+          <span className="font-mono-num text-2xl">{rankForRating(rating)}</span>
+        </Card>
+        <Card className="gap-1 p-4">
+          <span className="font-mono-num text-[11px] tracking-widest text-muted-foreground">
+            QUEUE
+          </span>
+          <span className="font-mono-num text-2xl">
+            {queued ? `~${state.etaSec}s` : "Idle"}
+          </span>
+        </Card>
+      </div>
     </div>
   );
 }
