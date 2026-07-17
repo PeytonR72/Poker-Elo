@@ -96,15 +96,7 @@ export default function AppShell(props: Parameters<typeof SidebarBody>[0] & { ch
             Poker<span className="text-emerald">Elo</span>
           </span>
         </div>
-        <motion.main
-          key={props.tab}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="relative z-10 mx-auto max-w-4xl p-6"
-        >
-          {children}
-        </motion.main>
+        <main className="relative z-10 mx-auto max-w-4xl p-6">{children}</main>
       </div>
     </div>
   );

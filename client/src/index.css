@@ -144,6 +144,37 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
 }
 
 /* ============================================================
+   Skeleton shimmer (animation-only; reduced-motion disables it)
+   ============================================================ */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-surface-3) 50%,
+    transparent 100%
+  );
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+  }
+}
+
+/* ============================================================
    Texture utilities
    ============================================================ */
 
