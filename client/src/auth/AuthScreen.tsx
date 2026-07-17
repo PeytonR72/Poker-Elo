@@ -34,17 +34,17 @@ export default function AuthScreen({ auth }: { auth: SessionApi }) {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-base bg-[radial-gradient(ellipse_at_top,rgba(47,217,135,0.08),transparent_60%)] p-6">
+    <div className="bg-noise bg-vignette relative flex min-h-screen items-center justify-center bg-base bg-[radial-gradient(ellipse_at_top,rgba(47,217,135,0.08),transparent_60%)] p-6">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="w-full max-w-sm"
+        className="relative z-10 w-full max-w-sm"
       >
         <Card>
           <CardHeader className="flex flex-col items-center gap-2 text-center">
             <Logo size={44} />
-            <CardTitle className="text-xl">
+            <CardTitle className="font-display text-xl">
               Poker<span className="text-emerald">Elo</span>
             </CardTitle>
           </CardHeader>

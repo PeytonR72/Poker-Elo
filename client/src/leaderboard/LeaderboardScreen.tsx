@@ -91,7 +91,7 @@ export default function LeaderboardScreen({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Global Leaderboard</h1>
+          <h1 className="font-display text-3xl font-bold">Global Leaderboard</h1>
           <p className="text-sm text-muted-foreground">Top ranked players by Elo rating.</p>
         </div>
         <div className="relative w-full max-w-xs">

@@ -65,7 +65,7 @@ export default function ProfileScreen({
           }`}
         />
         <div className="flex flex-col gap-2">
-          <h1 className="text-4xl font-bold">{header.name}</h1>
+          <h1 className="font-display text-4xl font-bold">{header.name}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <RatingBadge rating={header.rating} />
             <Badge variant="secondary">{rankForRating(header.rating)}</Badge>

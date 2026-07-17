@@ -79,8 +79,8 @@ export default function AppShell(props: Parameters<typeof SidebarBody>[0] & { ch
       <aside className="hidden w-60 shrink-0 border-r border-edge bg-surface md:block">
         <SidebarBody {...side} />
       </aside>
-      <div className="flex-1">
-        <div className="flex items-center gap-2 border-b border-edge p-3 md:hidden">
+      <div className="relative flex-1 bg-noise bg-vignette">
+        <div className="relative z-10 flex items-center gap-2 border-b border-edge p-3 md:hidden">
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="secondary" size="icon" aria-label="Menu">
@@ -101,7 +101,7 @@ export default function AppShell(props: Parameters<typeof SidebarBody>[0] & { ch
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="mx-auto max-w-4xl p-6"
+          className="relative z-10 mx-auto max-w-4xl p-6"
         >
           {children}
         </motion.main>
