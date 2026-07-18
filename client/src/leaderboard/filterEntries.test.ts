@@ -11,6 +11,8 @@ const e = (username: string, id?: string): LeaderboardEntry => {
     name: displayName({ id: userId, username }),
     rating: 400,
     gamesPlayed: 10,
+    wins: 0,
+    winRate: 0,
     isOwn: false,
   };
 };
