@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { ELO_DEFAULT_RATING } from "@poker/shared";
 import { supabase } from "../lib/supabase.js";
 import type { SessionApi } from "../auth/useSession.js";
@@ -70,8 +71,23 @@ export default function Home({
     >
       {ratingError && <p className="mb-4 text-sm text-danger">{ratingError}</p>}
       <PageTransition key={tab}>
-        {tab === "play" && <LobbyScreen auth={auth} rating={rating} onMatchFound={onMatchFound} />}
-        {tab === "leaderboard" && <LeaderboardScreen ownId={auth.userId} onOpenProfile={openProfile} />}
+        {tab === "play" && (
+          <LobbyScreen
+            auth={auth}
+            rating={rating}
+            onMatchFound={(roomId, format) => {
+              toast.success("Match found — taking your seat");
+              onMatchFound(roomId, format);
+            }}
+          />
+        )}
+        {tab === "leaderboard" && (
+          <LeaderboardScreen
+            ownId={auth.userId}
+            onOpenProfile={openProfile}
+            onFindMatch={() => setTab("play")}
+          />
+        )}
         {tab === "profile" && <ProfileScreen playerId={profileId ?? auth.userId} onBack={() => setTab(profileFromTab)} />}
       </PageTransition>
     </AppShell>

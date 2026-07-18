@@ -59,6 +59,21 @@
 :root { color-scheme: dark; }
 body { @apply bg-base text-neutral-200 font-sans m-0; }
 
+/* ============================================================
+   Global keyboard-focus ring (emerald, offset for dark bg).
+   Covers raw <button>/<a>/[tabindex] elements that don't carry a
+   shadcn focus-visible utility; components with their own ring simply
+   render both harmoniously.
+   ============================================================ */
+:focus-visible {
+  outline: 2px solid var(--color-emerald);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* shadcn semantic variables mapped onto our palette (dark-only app) */
 :root {
   --background: var(--color-base);
