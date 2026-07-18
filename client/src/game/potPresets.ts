@@ -13,6 +13,7 @@ export function potPresets(
   const f = (frac: number) => clampRaiseTo(currentBet + Math.round(frac * (potTotal + call)), mask);
   const out = [
     { label: "Min", raiseTo: clampRaiseTo(mask.minRaiseTo, mask) },
+    { label: "1/3 Pot", raiseTo: f(1 / 3) },
     { label: "1/2 Pot", raiseTo: f(0.5) },
     { label: "Pot", raiseTo: f(1) },
     { label: "Max", raiseTo: clampRaiseTo(mask.maxRaiseTo, mask) },

@@ -19,6 +19,16 @@ export function defaultCountUpFormat(n: number): string {
 }
 
 /**
+ * Text for a single animation frame. The spring's value is fractional while
+ * animating and asymptotic at rest (e.g. 1160.007), so it is ALWAYS rounded to
+ * an integer BEFORE the formatter runs — chip amounts must never display
+ * fraction digits, regardless of what custom `format` a call site passes.
+ */
+export function countUpText(n: number, format: (n: number) => string): string {
+  return format(Math.round(n))
+}
+
+/**
  * Spring-based number animator. Animates from the previous value to the new
  * value whenever `value` changes (never from 0 on every render). Renders
  * tabular-nums and snaps instantly when the user prefers reduced motion.
@@ -41,7 +51,7 @@ export function CountUp({
   })
   // When reduced motion is preferred, read the raw value (instant snap).
   const source = reduced ? motionValue : spring
-  const text = useTransform(source, (n) => format(n))
+  const text = useTransform(source, (n) => countUpText(n, format))
 
   useEffect(() => {
     motionValue.set(value)

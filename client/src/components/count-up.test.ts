@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultCountUpFormat } from "./count-up.js";
+import { countUpText, defaultCountUpFormat } from "./count-up.js";
+import { formatChips } from "../game/viewHelpers.js";
 
 describe("defaultCountUpFormat", () => {
   it("rounds to the nearest integer", () => {
@@ -15,5 +16,19 @@ describe("defaultCountUpFormat", () => {
   it("handles zero and negatives", () => {
     expect(defaultCountUpFormat(0)).toBe("0");
     expect(defaultCountUpFormat(-1500.2)).toBe("-1,500");
+  });
+});
+
+describe("countUpText", () => {
+  it("rounds spring frame values before a non-rounding custom format runs", () => {
+    // Regression: seat stacks showed "910.015" / "1,160.007" because the
+    // spring's fractional/asymptotic value reached formatChips un-rounded.
+    expect(countUpText(910.015, formatChips)).toBe("910");
+    expect(countUpText(1160.007, formatChips)).toBe("1,160");
+    expect(countUpText(1159.51, formatChips)).toBe("1,160");
+  });
+
+  it("rounds for the default formatter too", () => {
+    expect(countUpText(412.6, defaultCountUpFormat)).toBe("413");
   });
 });

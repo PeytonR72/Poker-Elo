@@ -1,26 +1,51 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import { MATCH_FORMATS } from "@poker/shared";
 import type { MatchUiState } from "./matchReducer.js";
+import type { PlayerNameMap } from "./usePlayerNames.js";
 import SeatView from "./SeatView.js";
 import Board from "./Board.js";
+import SpadeWatermark from "../assets/decor/SpadeWatermark.js";
 import { positionLabel } from "./viewHelpers.js";
+import { handNameFor } from "./handName.js";
 
 // UI-only feedback timings (not poker rules — see shared/src/constants.ts for those).
 const WINNER_GLOW_MS = 2_500;
 const WINNER_GLOW_MS_SHOWDOWN = 6_000;
+// Fallback per-turn duration for the timebank ring when a format lookup misses.
+const FALLBACK_TURN_MS = 15_000;
 
-// Six fixed positions around an oval (own seat forced to bottom-center by rotation).
+// Six seats on an ellipse, own seat forced to bottom-center (slot 0). Percentages
+// are of the felt container; the ellipse keeps pods clear of the rail on both axes.
 const POSITIONS: Array<React.CSSProperties> = [
-  { left: "50%", top: "88%", transform: "translate(-50%, -50%)" },
-  { left: "18%", top: "75%", transform: "translate(-50%, -50%)" },
-  { left: "6%", top: "40%", transform: "translate(-50%, -50%)" },
-  { left: "35%", top: "8%", transform: "translate(-50%, -50%)" },
-  { left: "65%", top: "8%", transform: "translate(-50%, -50%)" },
-  { left: "94%", top: "40%", transform: "translate(-50%, -50%)" },
+  { left: "50%", top: "92%" }, // bottom-center (hero)
+  { left: "13%", top: "78%" }, // bottom-left
+  { left: "4%", top: "34%" }, // top-left
+  { left: "35%", top: "6%" }, // top-center-left
+  { left: "65%", top: "6%" }, // top-center-right
+  { left: "96%", top: "34%" }, // top-right
 ];
 
-export default function Table({ state }: { state: MatchUiState }) {
+// Compact portrait layout: pods pulled inward so nothing clips at ~390px.
+const COMPACT_POSITIONS: Array<React.CSSProperties> = [
+  { left: "50%", top: "93%" },
+  { left: "21%", top: "80%" },
+  { left: "17%", top: "37%" },
+  { left: "40%", top: "6%" },
+  { left: "60%", top: "6%" },
+  { left: "83%", top: "37%" },
+];
+
+export default function Table({
+  state,
+  names,
+  compact = false,
+}: {
+  state: MatchUiState;
+  names: PlayerNameMap;
+  compact?: boolean;
+}) {
   const view = state.view;
 
   const [glowSeats, setGlowSeats] = useState<number[]>([]);
@@ -29,16 +54,11 @@ export default function Table({ state }: { state: MatchUiState }) {
     if (state.handCompleteSeq === lastHandleSeq.current) return;
     lastHandleSeq.current = state.handCompleteSeq;
     setGlowSeats(state.winners);
-    // This timer is a fallback cap only — the real clear signal is the next hand
-    // actually starting (below), since the server's inter-hand pause clock and this
-    // client's display pacing aren't the same clock and can drift.
     const duration = state.showdownThisHand ? WINNER_GLOW_MS_SHOWDOWN : WINNER_GLOW_MS;
     const timer = setTimeout(() => setGlowSeats([]), duration);
     return () => clearTimeout(timer);
   }, [state.handCompleteSeq, state.winners, state.showdownThisHand]);
 
-  // Authoritative clear: the moment the server confirms a new hand has actually dealt,
-  // drop any lingering winner glow from the previous one immediately.
   const lastHandNumber = useRef<number | null>(null);
   useEffect(() => {
     const hn = view?.handNumber ?? null;
@@ -52,22 +72,64 @@ export default function Table({ state }: { state: MatchUiState }) {
   if (!view) return <p className="text-center text-neutral-400">Waiting for the table…</p>;
   const n = view.seats.length;
   const own = state.ownSeat ?? 0;
-  // view.pots is only ever populated transiently inside settleShowdown/awardSingleWinner
-  // (reset to [] immediately after distributing chips), so every snapshot we actually
-  // receive has pots === []. The live pot during a hand is each seat's total contribution.
   const pot = view.seats.reduce((sum, s) => sum + (s?.committedTotal ?? 0), 0);
   const streetCommitted = view.seats.reduce((sum, s) => sum + (s?.committedThisStreet ?? 0), 0);
 
+  // Timebank ring timing. Hero: exact remaining from the server's yourTurn deadline.
+  // Opponents: best-effort format turn cap (no per-turn deadline is broadcast).
+  const now = Date.now();
+  const formatTurnMs = MATCH_FORMATS[state.matchInfo?.format ?? ""]?.turnTimeMs ?? FALLBACK_TURN_MS;
+  const heroRemaining =
+    state.turn && state.ownSeat !== null && view.toAct === state.ownSeat
+      ? Math.max(0, state.turn.deadlineTs - now)
+      : null;
+  const turnKey = `${view.handNumber}:${view.street}:${view.toAct}`;
+
+  // Winning hand name at showdown: derive from the first winner's revealed cards.
+  let handName: string | null = null;
+  if (glowSeats.length > 0 && state.showdownThisHand) {
+    const w = glowSeats[0];
+    const winner = w != null ? view.seats[w] : null;
+    if (winner?.holeCards) handName = handNameFor(winner.holeCards, view.board);
+  }
+
+  const positions = compact ? COMPACT_POSITIONS : POSITIONS;
+
   return (
-    <div className="relative mx-auto h-[520px] w-[min(900px,95vw)]">
-      <div className="absolute inset-[12%_6%] rounded-[50%] border border-emerald/15 bg-[radial-gradient(ellipse_at_center,#0d3326,#071a13)] shadow-[inset_0_0_80px_rgba(0,0,0,0.55)]" />
-      <div className="absolute inset-0 flex items-center justify-center">
-        <Board board={view.board} pot={pot} handNumber={view.handNumber} />
+    <div
+      className={`relative mx-auto max-h-full ${compact ? "aspect-[7/9] w-[min(420px,94vw)]" : "aspect-[16/11] w-[min(960px,96vw)]"}`}
+    >
+      {/* Outer rail ring (wood-ish) */}
+      <div className="absolute inset-0 rounded-[46%] bg-[radial-gradient(ellipse_at_center,#1c130c,#0b0705)] shadow-e3" />
+      <div className="absolute inset-[1.5%] rounded-[46%] border border-emerald-dim/40" />
+      {/* Felt */}
+      <div className="absolute inset-[4%] overflow-hidden rounded-[46%] border border-black/40 bg-[radial-gradient(ellipse_at_center,var(--color-felt-hi),var(--color-felt-1)_55%,var(--color-felt-2))] shadow-[inset_0_0_70px_rgba(0,0,0,0.6)]">
+        {/* Fabric noise */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+          }}
+        />
+        {/* Center watermark */}
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <SpadeWatermark size={220} opacity={0.05} />
+        </div>
       </div>
-      {/* Slide target: once a street's commits have been swept into the pot (all seats
-          back to 0 committedThisStreet, but the pot itself is nonzero), each seat's commit
-          pill's shared layoutId re-parents here so Motion animates the "collect to pot"
-          flight instead of just vanishing. */}
+
+      {/* Center board + pot */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <Board
+          board={view.board}
+          pot={pot}
+          handNumber={view.handNumber}
+          handName={handName}
+          compact={compact}
+        />
+      </div>
+
+      {/* Pot-collect flight target (bet chips re-parent here on street end) */}
       {streetCommitted === 0 &&
         pot > 0 &&
         view.seats.map((seat, i) =>
@@ -80,22 +142,40 @@ export default function Table({ state }: { state: MatchUiState }) {
             />
           ) : null,
         )}
+
+      {/* Seats */}
       {view.seats.map((seat, i) => {
-        // Rotate so our seat sits at POSITIONS[0] (bottom-center).
         const slot = (i - own + n) % n;
-        const pos = POSITIONS[slot] ?? POSITIONS[0]!;
+        const pos = positions[slot] ?? positions[0]!;
+        const isToAct = view.toAct === i;
+        const isOwnSeat = i === state.ownSeat;
+        // remaining: hero = exact server deadline remainder; opponents = full cap.
+        // The ring's total duration is the format's turn cap for both, so a
+        // mid-turn (re)mount starts the arc at the correct partial fraction.
+        const remaining = isToAct ? (isOwnSeat ? heroRemaining : formatTurnMs) : null;
+        const info = names[seat?.id ?? ""];
         return (
-          <div key={i} className="absolute" style={pos}>
+          <div
+            key={i}
+            className="absolute z-10"
+            style={{ ...pos, transform: "translate(-50%, -50%)" }}
+          >
             <SeatView
               seat={seat}
               seatIndex={i}
-              isOwn={i === state.ownSeat}
-              isToAct={view.toAct === i}
+              isOwn={isOwnSeat}
+              isToAct={isToAct}
               isDealer={view.buttonIndex === i}
               ownHole={state.ownHole}
               lastAction={state.actionBySeat[i]}
               position={positionLabel(i, view.buttonIndex)}
               isWinner={glowSeats.includes(i)}
+              name={info?.name}
+              rating={info?.rating}
+              turnRemainingMs={remaining}
+              turnDurationMs={formatTurnMs}
+              turnKey={turnKey}
+              compact={compact}
             />
           </div>
         );
