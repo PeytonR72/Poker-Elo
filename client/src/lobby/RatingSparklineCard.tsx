@@ -20,7 +20,7 @@ export default function RatingSparklineCard({
 
   return (
     <Card className="gap-3 p-4">
-      <h3 className="text-label-caps text-muted-foreground">Rating</h3>
+      <h3 className="text-label-caps text-muted-foreground">Rating Progress</h3>
 
       <div className="text-stat text-3xl">
         <CountUp value={rating} />

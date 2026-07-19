@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { Play, Trophy, User, LogOut, Menu } from "lucide-react";
 import { rankForRating } from "@poker/shared";
@@ -111,6 +111,23 @@ function SidebarBody(props: {
 
 export default function AppShell(props: Parameters<typeof SidebarBody>[0] & { children: ReactNode }) {
   const { children, ...side } = props;
+  const [sheetOpen, setSheetOpen] = useState(false);
+  // Inside the mobile sheet, any nav/action tap should also close the drawer.
+  const sheetSide: typeof side = {
+    ...side,
+    onTabChange: (t) => {
+      setSheetOpen(false);
+      side.onTabChange(t);
+    },
+    onFindMatch: () => {
+      setSheetOpen(false);
+      side.onFindMatch();
+    },
+    onSignOut: () => {
+      setSheetOpen(false);
+      side.onSignOut();
+    },
+  };
   return (
     <div className="flex min-h-screen bg-base">
       <aside className="hidden w-60 shrink-0 border-r border-edge bg-surface md:block">
@@ -118,14 +135,14 @@ export default function AppShell(props: Parameters<typeof SidebarBody>[0] & { ch
       </aside>
       <div className="relative flex-1 bg-noise bg-vignette">
         <div className="relative z-10 flex items-center gap-2 border-b border-edge p-3 md:hidden">
-          <Sheet>
+          <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger asChild>
               <Button variant="secondary" size="icon" aria-label="Menu">
                 <Menu size={18} />
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-64 bg-surface p-0">
-              <SidebarBody {...side} />
+              <SidebarBody {...sheetSide} />
             </SheetContent>
           </Sheet>
           <Logo size={24} />
