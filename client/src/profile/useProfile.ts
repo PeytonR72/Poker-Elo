@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ELO_DEFAULT_RATING } from "@poker/shared";
 import { supabase } from "../lib/supabase.js";
 import type { ProfileRow } from "../data/leaderboard.js";
@@ -9,12 +9,16 @@ export interface ProfileFetch {
   error: string | null;
   profile: ProfileRow | null;
   results: MatchResultRow[];
+  /** Re-run the fetch (used by the error-state retry button). */
+  refetch: () => void;
 }
 
 export function useProfile(playerId: string | null): ProfileFetch {
-  const [state, setState] = useState<ProfileFetch>({
+  const [state, setState] = useState<Omit<ProfileFetch, "refetch">>({
     loading: true, error: null, profile: null, results: [],
   });
+  const [nonce, setNonce] = useState(0);
+  const refetch = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
     if (!playerId) {
@@ -40,7 +44,7 @@ export function useProfile(playerId: string | null): ProfileFetch {
 
       const { data: res, error: resErr } = await supabase
         .from("match_results")
-        .select("match_id, finish_place, elo_delta, rating_after, matches(format, ended_at)")
+        .select("match_id, finish_place, elo_delta, rating_after, matches(format, started_at, ended_at)")
         .eq("player_id", playerId)
         .order("ended_at", { ascending: false, referencedTable: "matches" });
       if (cancelled) return;
@@ -57,7 +61,7 @@ export function useProfile(playerId: string | null): ProfileFetch {
     }
     void load();
     return () => { cancelled = true; };
-  }, [playerId]);
+  }, [playerId, nonce]);
 
-  return state;
+  return { ...state, refetch };
 }

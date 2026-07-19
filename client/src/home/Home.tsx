@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { ELO_DEFAULT_RATING } from "@poker/shared";
 import { supabase } from "../lib/supabase.js";
 import type { SessionApi } from "../auth/useSession.js";
@@ -6,6 +7,7 @@ import AppShell, { type ShellTab } from "../shell/AppShell.js";
 import LobbyScreen from "../lobby/LobbyScreen.js";
 import LeaderboardScreen from "../leaderboard/LeaderboardScreen.js";
 import ProfileScreen from "../profile/ProfileScreen.js";
+import PageTransition from "../components/page-transition.js";
 
 type Tab = ShellTab;
 
@@ -68,9 +70,26 @@ export default function Home({
       onSignOut={() => void auth.signOut()}
     >
       {ratingError && <p className="mb-4 text-sm text-danger">{ratingError}</p>}
-      {tab === "play" && <LobbyScreen auth={auth} rating={rating} onMatchFound={onMatchFound} />}
-      {tab === "leaderboard" && <LeaderboardScreen ownId={auth.userId} onOpenProfile={openProfile} />}
-      {tab === "profile" && <ProfileScreen playerId={profileId ?? auth.userId} onBack={() => setTab(profileFromTab)} />}
+      <PageTransition key={tab}>
+        {tab === "play" && (
+          <LobbyScreen
+            auth={auth}
+            rating={rating}
+            onMatchFound={(roomId, format) => {
+              toast.success("Match found — taking your seat");
+              onMatchFound(roomId, format);
+            }}
+          />
+        )}
+        {tab === "leaderboard" && (
+          <LeaderboardScreen
+            ownId={auth.userId}
+            onOpenProfile={openProfile}
+            onFindMatch={() => setTab("play")}
+          />
+        )}
+        {tab === "profile" && <ProfileScreen playerId={profileId ?? auth.userId} onBack={() => setTab(profileFromTab)} />}
+      </PageTransition>
     </AppShell>
   );
 }

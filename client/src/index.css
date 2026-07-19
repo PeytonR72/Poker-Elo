@@ -1,22 +1,78 @@
 @import "tailwindcss";
 
+/* Self-hosted fonts (never import font CSS from .tsx — breaks tsc). */
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
 @theme {
-  --color-base: #0a0e12;
-  --color-surface: #12181f;
-  --color-surface-2: #1a222b;
+  /* --- Surface elevation scale (5 levels) --- */
+  --color-base: #0a0e12; /* page (level 0) */
+  --color-surface: #12181f; /* card (level 1) */
+  --color-surface-2: #1a222b; /* raised (level 2) */
+  --color-surface-3: #222b36; /* overlay / popover (level 3) */
+  --color-overlay: rgba(5, 8, 11, 0.72); /* modal scrim */
+
+  /* --- Edges --- */
   --color-edge: #232d38;
+  --color-edge-bright: #2f3b49; /* hover borders */
+
+  /* --- Emerald scale --- */
+  --color-emerald-tint: rgba(47, 217, 135, 0.08); /* low-alpha background wash */
+  --color-emerald-dim: #1a8f5c; /* pressed / borders */
   --color-emerald: #2fd987;
   --color-emerald-hover: #4ce3a0;
+
+  /* --- Semantic --- */
   --color-gold: #e8c35a;
+  --color-gold-dim: #a8862f; /* border / pressed */
   --color-danger: #ff6b6b;
+  --color-danger-dim: #b23b3b; /* border / pressed */
+
+  /* --- Felt --- */
+  --color-felt-hi: #145c40; /* lighter center highlight (Phase 4 radial) */
   --color-felt-1: #0d3326;
   --color-felt-2: #071a13;
+
+  /* --- Typography --- */
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono-num: "JetBrains Mono", ui-monospace, monospace;
+
+  /* --- Elevation shadows (plain dark) --- */
+  --shadow-e1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-e2: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-e3: 0 12px 32px rgba(0, 0, 0, 0.55);
+
+  /* --- Glow shadows --- */
+  --shadow-glow-sm: 0 0 12px rgba(47, 217, 135, 0.25);
+  --shadow-glow-md: 0 0 20px rgba(47, 217, 135, 0.32);
+  --shadow-glow-lg: 0 0 34px rgba(47, 217, 135, 0.4);
+  --shadow-glow-danger: 0 0 20px rgba(255, 107, 107, 0.32);
+  --shadow-glow-gold: 0 0 20px rgba(232, 195, 90, 0.32);
 }
 
 :root { color-scheme: dark; }
 body { @apply bg-base text-neutral-200 font-sans m-0; }
+
+/* ============================================================
+   Global keyboard-focus ring (emerald, offset for dark bg).
+   Covers raw <button>/<a>/[tabindex] elements that don't carry a
+   shadcn focus-visible utility; components with their own ring simply
+   render both harmoniously.
+   ============================================================ */
+:focus-visible {
+  outline: 2px solid var(--color-emerald);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
 
 /* shadcn semantic variables mapped onto our palette (dark-only app) */
 :root {
@@ -24,6 +80,8 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
   --foreground: #e6e6e6;
   --card: var(--color-surface);
   --card-foreground: #e6e6e6;
+  --popover: var(--color-surface-3);
+  --popover-foreground: #e6e6e6;
   --primary: var(--color-emerald);
   --primary-foreground: #05231a;
   --secondary: var(--color-surface-2);
@@ -44,6 +102,8 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -56,5 +116,110 @@ body { @apply bg-base text-neutral-200 font-sans m-0; }
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ============================================================
+   Type-scale utilities
+   ============================================================ */
+.text-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2.5rem, 1.6rem + 3vw, 3.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+}
+.text-h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.875rem; /* 30px */
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+.text-h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.375rem; /* 22px */
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.text-label-caps {
+  font-family: var(--font-mono-num);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.text-stat {
+  font-family: var(--font-mono-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Skeleton shimmer (animation-only; reduced-motion disables it)
+   ============================================================ */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-surface-3) 50%,
+    transparent 100%
+  );
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   Texture utilities
+   ============================================================ */
+
+/* Subtle film grain via an inline feTurbulence SVG overlay. */
+.bg-noise {
+  position: relative;
+}
+.bg-noise::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Radial vignette: transparent center darkening to the edges. */
+.bg-vignette {
+  position: relative;
+}
+.bg-vignette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 45%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
 }

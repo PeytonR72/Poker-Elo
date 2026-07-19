@@ -13,6 +13,10 @@ export interface LeaderboardEntry {
   name: string;
   rating: number;
   gamesPlayed: number;
+  /** First-place finishes (from match_results); 0 when unknown. */
+  wins: number;
+  /** wins / gamesPlayed, or null when the player has no games. */
+  winRate: number | null;
   isOwn: boolean;
 }
 
@@ -21,11 +25,35 @@ export interface Leaderboard {
   ownTail?: LeaderboardEntry;
 }
 
+function winRateOf(wins: number, gamesPlayed: number): number | null {
+  return gamesPlayed > 0 ? wins / gamesPlayed : null;
+}
+
+function toEntry(
+  r: ProfileRow,
+  position: number,
+  ownId: string | null,
+  winsById: Record<string, number>,
+): LeaderboardEntry {
+  const wins = winsById[r.id] ?? 0;
+  return {
+    position,
+    id: r.id,
+    name: displayName(r),
+    rating: r.rating,
+    gamesPlayed: r.games_played,
+    wins,
+    winRate: winRateOf(wins, r.games_played),
+    isOwn: r.id === ownId,
+  };
+}
+
 export function buildLeaderboard(
   rows: ProfileRow[],
   ownRow: ProfileRow | null,
   ownPosition: number | null,
   ownId: string | null,
+  winsById: Record<string, number> = {},
 ): Leaderboard {
   const sorted = [...rows].sort(
     (a, b) => b.rating - a.rating || displayName(a).localeCompare(displayName(b)),
@@ -37,26 +65,12 @@ export function buildLeaderboard(
       prevPosition = i + 1;
       prevRating = r.rating;
     }
-    return {
-    position: prevPosition,
-    id: r.id,
-    name: displayName(r),
-    rating: r.rating,
-    gamesPlayed: r.games_played,
-    isOwn: r.id === ownId,
-    };
+    return toEntry(r, prevPosition, ownId, winsById);
   });
 
   const inTop = ownId != null && entries.some((e) => e.isOwn);
   if (!inTop && ownRow && ownPosition != null && ownRow.games_played > 0) {
-    const ownTail: LeaderboardEntry = {
-      position: ownPosition,
-      id: ownRow.id,
-      name: displayName(ownRow),
-      rating: ownRow.rating,
-      gamesPlayed: ownRow.games_played,
-      isOwn: true,
-    };
+    const ownTail = toEntry(ownRow, ownPosition, ownId, winsById);
     return { entries, ownTail };
   }
   return { entries };

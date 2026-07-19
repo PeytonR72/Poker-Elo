@@ -1,30 +1,31 @@
 import { motion } from "motion/react";
-import { formatCard } from "./viewHelpers.js";
+import PlayingCard from "../components/playing-card.js";
+import { cardIntToProps } from "../assets/cards/cardMap.js";
 
-const RED = new Set(["h", "d"]);
-
-/** A single playing card: face-down back, or a static/flip-revealed face. */
-export default function CardView({ card, flip = false }: { card: number | null; flip?: boolean }) {
+/**
+ * A single playing card for the felt. `card === null` renders the emerald
+ * face-down back (opponent hole cards, undealt board slots); a number renders
+ * the real face via the parametric `<PlayingCard>` deck. `flip` plays a 3D
+ * rotateY reveal on mount (board streets, showdown).
+ *
+ * Size is controlled by `className` (defaults to the table card size); a
+ * face-down back keeps the same footprint.
+ */
+export default function CardView({
+  card,
+  flip = false,
+  className,
+}: {
+  card: number | null;
+  flip?: boolean;
+  className?: string;
+}) {
+  const size = className ?? "h-[4.5rem] w-[3.25rem]";
   if (card === null) {
-    return (
-      <span className="relative m-0.5 grid h-20 w-14 place-items-center rounded-lg border border-edge bg-surface-2">
-        <span className="h-8 w-8 rounded-full border-2 border-emerald/25" />
-      </span>
-    );
+    return <PlayingCard rank="A" suit="s" faceDown className={`m-0.5 ${size}`} />;
   }
-  const s = formatCard(card);
-  const suit = s.slice(-1);
-  const rank = s.slice(0, -1);
-  const color = RED.has(suit) ? "#d33" : "#1a1a1a";
-  const face = (
-    <span
-      className="m-0.5 grid h-20 w-14 place-items-center rounded-lg border border-neutral-300 bg-white text-lg font-bold shadow-md"
-      style={{ color }}
-    >
-      {rank}
-      <span className="text-base">{suitGlyph(suit)}</span>
-    </span>
-  );
+  const { rank, suit } = cardIntToProps(card);
+  const face = <PlayingCard rank={rank} suit={suit} className={`m-0.5 ${size}`} />;
   if (!flip) return face;
   return (
     <motion.span
@@ -37,19 +38,4 @@ export default function CardView({ card, flip = false }: { card: number | null; 
       {face}
     </motion.span>
   );
-}
-
-function suitGlyph(suit: string): string {
-  switch (suit) {
-    case "h":
-      return "♥";
-    case "d":
-      return "♦";
-    case "c":
-      return "♣";
-    case "s":
-      return "♠";
-    default:
-      return suit;
-  }
 }

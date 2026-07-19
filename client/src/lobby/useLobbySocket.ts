@@ -17,6 +17,9 @@ export function useLobbySocket(getJwt: () => string | null) {
     sockRef.current = socket;
     socket.addEventListener("open", () => {
       setConnStatus("open");
+      // Drop any stale error banner from before the (re)connect; re-auth below
+      // will surface a fresh error only if it genuinely fails.
+      dispatch({ t: "connected" });
       const jwt = getJwt();
       if (jwt) socket.send(encode({ t: "hello", jwt }));
     });

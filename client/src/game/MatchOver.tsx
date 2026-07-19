@@ -3,7 +3,8 @@ import { animate } from "motion";
 import { motion } from "motion/react";
 import { Trophy } from "lucide-react";
 import { displayName } from "../data/displayName.js";
-import { avatarUrl } from "../data/avatar.js";
+import { TierAvatar } from "../components/tier-avatar.js";
+import type { PlayerNameMap } from "./usePlayerNames.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
 
@@ -29,11 +30,13 @@ export default function MatchOver({
   ownId,
   finishPlaceById,
   eloDeltas,
+  names = {},
   onLeave,
 }: {
   ownId: string | null;
   finishPlaceById: Record<string, number>;
   eloDeltas: Record<string, number>;
+  names?: PlayerNameMap;
   onLeave: () => void;
 }) {
   const rows = Object.entries(finishPlaceById).sort((a, b) => a[1] - b[1]);
@@ -65,9 +68,15 @@ export default function MatchOver({
                   >
                     {isFirst ? <Trophy className="mx-auto h-4 w-4" /> : place}
                   </span>
-                  <img src={avatarUrl(id)} alt="" className="h-7 w-7 shrink-0 rounded-full bg-surface-2" />
+                  <TierAvatar
+                    seed={id}
+                    rating={names[id]?.rating}
+                    name={names[id]?.name ?? displayName({ id })}
+                    size={28}
+                    className="shrink-0"
+                  />
                   <span className="flex-1 truncate text-sm text-neutral-200">
-                    {displayName({ id })}
+                    {names[id]?.name ?? displayName({ id })}
                     {isOwn ? " (you)" : ""}
                   </span>
                   <EloDelta value={eloDeltas[id] ?? 0} />

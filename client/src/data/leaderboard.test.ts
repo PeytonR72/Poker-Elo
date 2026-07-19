@@ -26,10 +26,28 @@ describe("buildLeaderboard", () => {
   it("appends an own tail when the player is outside the list", () => {
     const rows = [row({ id: "a", rating: 500 })];
     const ownRow = row({ id: "me", username: "Me", rating: 410, games_played: 4 });
-    const lb = buildLeaderboard(rows, ownRow, 87, "me");
+    const lb = buildLeaderboard(rows, ownRow, 87, "me", { me: 1 });
     expect(lb.ownTail).toEqual({
-      position: 87, id: "me", name: "Me", rating: 410, gamesPlayed: 4, isOwn: true,
+      position: 87, id: "me", name: "Me", rating: 410, gamesPlayed: 4,
+      wins: 1, winRate: 0.25, isOwn: true,
     });
+  });
+
+  it("derives wins and win-rate from the wins map (default 0 when absent)", () => {
+    const rows = [
+      row({ id: "a", rating: 600, games_played: 10 }),
+      row({ id: "b", rating: 500, games_played: 4 }),
+    ];
+    const { entries } = buildLeaderboard(rows, null, null, null, { a: 3 });
+    const a = entries.find((e) => e.id === "a")!;
+    const b = entries.find((e) => e.id === "b")!;
+    expect([a.wins, a.winRate]).toEqual([3, 0.3]);
+    expect([b.wins, b.winRate]).toEqual([0, 0]);
+  });
+
+  it("reports a null win-rate when the player has zero games", () => {
+    const { entries } = buildLeaderboard([row({ id: "z", games_played: 0 })], null, null, null);
+    expect(entries[0]?.winRate).toBeNull();
   });
 
   it("omits the tail when the own player has played zero games", () => {
