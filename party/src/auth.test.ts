@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SignJWT } from "jose";
+import { SignJWT, generateKeyPair, exportJWK, createLocalJWKSet } from "jose";
 import { verifyJwt, parseDevToken } from "./auth.js";
 
 describe("parseDevToken", () => {
@@ -74,5 +74,48 @@ describe("verifyJwt", () => {
     await expect(verifyJwt(token, { secret: "irrelevant-for-es256" })).rejects.toThrow(
       "no supabaseUrl is configured"
     );
+  });
+
+  describe("ES256/JWKS success path (offline, injected key resolver)", () => {
+    it("accepts a valid ES256 JWT verified against a local JWKS", async () => {
+      const { publicKey, privateKey } = await generateKeyPair("ES256");
+      const jwk = await exportJWK(publicKey);
+      jwk.kid = "test-key-1";
+      const jwks = createLocalJWKSet({ keys: [jwk] });
+
+      const token = await new SignJWT({ sub: "user-789" })
+        .setProtectedHeader({ alg: "ES256", kid: "test-key-1" })
+        .sign(privateKey);
+
+      const payload = await verifyJwt(token, { jwks });
+      expect(payload).toEqual({ sub: "user-789" });
+    });
+
+    it("rejects an ES256 JWT signed by a different keypair", async () => {
+      const { publicKey } = await generateKeyPair("ES256");
+      const jwk = await exportJWK(publicKey);
+      jwk.kid = "test-key-1";
+      const jwks = createLocalJWKSet({ keys: [jwk] });
+
+      const { privateKey: otherPrivateKey } = await generateKeyPair("ES256");
+      const token = await new SignJWT({ sub: "user-789" })
+        .setProtectedHeader({ alg: "ES256", kid: "test-key-1" })
+        .sign(otherPrivateKey);
+
+      await expect(verifyJwt(token, { jwks })).rejects.toThrow();
+    });
+
+    it("rejects a valid ES256 JWT missing the sub claim", async () => {
+      const { publicKey, privateKey } = await generateKeyPair("ES256");
+      const jwk = await exportJWK(publicKey);
+      jwk.kid = "test-key-1";
+      const jwks = createLocalJWKSet({ keys: [jwk] });
+
+      const token = await new SignJWT({ role: "user" })
+        .setProtectedHeader({ alg: "ES256", kid: "test-key-1" })
+        .sign(privateKey);
+
+      await expect(verifyJwt(token, { jwks })).rejects.toThrow("JWT missing sub");
+    });
   });
 });

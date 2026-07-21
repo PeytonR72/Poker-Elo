@@ -8,6 +8,8 @@ export interface VerifyJwtConfig {
   secret?: string;
   /** Supabase project URL, used to fetch the JWKS for newer asymmetric (ES256) signing keys. */
   supabaseUrl?: string;
+  /** Key resolver used in preference to fetching supabaseUrl's JWKS, e.g. for offline tests. */
+  jwks?: JWTVerifyGetKey;
 }
 
 const jwksCache = new Map<string, JWTVerifyGetKey>();
@@ -38,10 +40,14 @@ export async function verifyJwt(
     const key = new TextEncoder().encode(config.secret);
     ({ payload } = await jwtVerify(token, key, { algorithms: ["HS256"] }));
   } else {
-    if (!config.supabaseUrl) {
-      throw new Error(`${alg ?? "unknown"}-signed token received but no supabaseUrl is configured for JWKS verification`);
+    let jwks = config.jwks;
+    if (!jwks) {
+      if (!config.supabaseUrl) {
+        throw new Error(`${alg ?? "unknown"}-signed token received but no supabaseUrl is configured for JWKS verification`);
+      }
+      jwks = getJwks(config.supabaseUrl);
     }
-    ({ payload } = await jwtVerify(token, getJwks(config.supabaseUrl), {
+    ({ payload } = await jwtVerify(token, jwks, {
       algorithms: alg ? [alg] : undefined,
     }));
   }
