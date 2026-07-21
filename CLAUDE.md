@@ -64,7 +64,7 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 | `matchRoom.ts` | `MatchRoom` — `partyserver` `Server<Env>` Durable Object (the `MAIN` binding); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds }`), roster-aware start + bot-fill, `matchInfo` broadcast |
 | `lobby.ts` | `Lobby` — `partyserver` `Server<Env>` Durable Object (the `LOBBY` binding); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `getServerByName(this.env.MAIN, roomId)`, sends `queueStatus`/`matchFound` |
 | `matchmaker.ts` | `formMatches(waiters, now, onlineCount)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch` |
-| `auth.ts` | `verifyJwt(token, { secret?, supabaseUrl? })` — dispatches on the JWT's own `alg` header: `HS256` verifies against `secret` (legacy Supabase projects), anything else (e.g. `ES256`) verifies against `${supabaseUrl}/auth/v1/.well-known/jwks.json`. `parseDevToken("dev:<id>")` |
+| `auth.ts` | `verifyJwt(token, { secret?, supabaseUrl?, jwks? })` — dispatches on the JWT's own `alg` header: `HS256` verifies against `secret` (legacy Supabase projects), anything else (e.g. `ES256`) verifies against `jwks` if provided (test injection point), else `${supabaseUrl}/auth/v1/.well-known/jwks.json`. `parseDevToken("dev:<id>")` |
 | `env.ts` | `Env` — typed Durable Object bindings (`MAIN`, `LOBBY`) + secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_TOKENS`) |
 | `worker.ts` | The Worker `fetch` entrypoint — delegates to `partyserver`'s `routePartykitRequest`; exports `MatchRoom`/`Lobby` as the deployed Durable Object classes |
 | `timers.ts` | `TurnTimer` — `start(ms, cb)` (auto-cancels previous), `cancel()` |
@@ -209,10 +209,27 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
   dispatches on the token's own `alg` header to support both. Root `npm test` is now 138 tests
   (234 − 98 deleted + 2 new `auth.test.ts` cases for the JWKS dispatch logic).
 
-**Not yet done / next:** drop `favicon.svg` placeholder for the real spade PNG
-(`client/public/favicon.png`) and update `index.html` link. Consider adding an offline/local
-`createLocalJWKSet`-based test for `verifyJwt`'s successful ES256 verification path (currently
-verified only manually against live production traffic, not by an automated test — see Unit 8).
+- **Unit 9** — Deploy hygiene: `eslint.config.js` now ignores `**/.wrangler/**`, so `npm run lint`
+  is literally clean (zero errors/warnings) instead of relying on future agents to know the
+  `party/.wrangler/tmp/` build-artifact errors are expected noise. Real favicon PNGs
+  (`favicon-32.png`/`icon-192.png`/`icon-512.png`) rasterized from the existing SVG via `sharp`
+  (client devDependency only) plus description/OG meta tags added to `client/index.html`.
+  `GameScreen` is now lazy-loaded (`React.lazy`/`Suspense` in `App.tsx`), splitting it into its own
+  ~50 kB chunk — manually verified end to end against local `wrangler dev` (queue → match-found →
+  table handoff, no blank frame, no double-transition); the shared entry chunk stays above Vite's
+  500 kB warning threshold since `GameScreen` was only ~50 kB of the original 767 kB bundle and the
+  rest is cross-screen framework weight. `verifyJwt` gained an optional `jwks` key-resolver
+  override (used in preference to fetching `supabaseUrl`'s JWKS when present, no behavior change
+  when absent) so `auth.test.ts` can now cover the ES256/JWKS success path fully offline via
+  `createLocalJWKSet`, instead of only against live production traffic. Root `npm test` is now 224
+  tests (221 + 3 new ES256/JWKS success-path cases).
+
+**Not yet done / next:** `client/.env`'s `VITE_PARTYKIT_HOST` (and `.env.example`) still say the
+pre-Unit-8 `partykit`-era `localhost:1999`; local `wrangler dev` actually listens on
+`localhost:8787` by default, so the env value needs updating for local dev to reach the party
+server (see `handoff.md` known gaps). Further bundle splitting (`manualChunks` for
+`motion`/`radix-ui`/`@supabase/supabase-js`) would be needed to clear the 500 kB chunk-size warning
+entirely.
 
 ## Working practice
 
