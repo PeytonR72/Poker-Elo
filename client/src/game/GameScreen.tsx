@@ -97,7 +97,7 @@ export default function GameScreen({
       </div>
 
       {/* Felt */}
-      <div className="flex flex-1 items-center justify-center overflow-hidden px-2 py-2">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-2 py-2">
         <Table state={state} names={names} compact={compact} />
       </div>
 

@@ -18,22 +18,25 @@ const FALLBACK_TURN_MS = 15_000;
 
 // Six seats on an ellipse, own seat forced to bottom-center (slot 0). Percentages
 // are of the felt container; the ellipse keeps pods clear of the rail on both axes.
+// Top/bottom offsets leave enough headroom for the fixed-pixel pod+card
+// stack (which is centered on each point via translate(-50%,-50%)) so it
+// never clips the felt container's edges, even at the max table height.
 const POSITIONS: Array<React.CSSProperties> = [
-  { left: "50%", top: "92%" }, // bottom-center (hero)
-  { left: "13%", top: "78%" }, // bottom-left
+  { left: "50%", top: "85%" }, // bottom-center (hero)
+  { left: "13%", top: "76%" }, // bottom-left
   { left: "4%", top: "34%" }, // top-left
-  { left: "35%", top: "6%" }, // top-center-left
-  { left: "65%", top: "6%" }, // top-center-right
+  { left: "35%", top: "14%" }, // top-center-left
+  { left: "65%", top: "14%" }, // top-center-right
   { left: "96%", top: "34%" }, // top-right
 ];
 
 // Compact portrait layout: pods pulled inward so nothing clips at ~390px.
 const COMPACT_POSITIONS: Array<React.CSSProperties> = [
-  { left: "50%", top: "93%" },
-  { left: "21%", top: "80%" },
+  { left: "50%", top: "86%" },
+  { left: "21%", top: "78%" },
   { left: "17%", top: "37%" },
-  { left: "40%", top: "6%" },
-  { left: "60%", top: "6%" },
+  { left: "40%", top: "14%" },
+  { left: "60%", top: "14%" },
   { left: "83%", top: "37%" },
 ];
 
@@ -97,7 +100,7 @@ export default function Table({
 
   return (
     <div
-      className={`relative mx-auto max-h-full ${compact ? "aspect-[7/9] w-[min(420px,94vw)]" : "aspect-[16/11] w-[min(960px,96vw)]"}`}
+      className={`relative mx-auto h-full w-auto max-w-full ${compact ? "aspect-[7/9] max-w-[min(420px,94vw)]" : "aspect-[16/11] max-w-[min(960px,96vw)]"}`}
     >
       {/* Outer rail ring (wood-ish) */}
       <div className="absolute inset-0 rounded-[46%] bg-[radial-gradient(ellipse_at_center,#1c130c,#0b0705)] shadow-e3" />

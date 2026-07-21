@@ -84,7 +84,7 @@ export default function ActionBar({
       transition={{ type: "spring", stiffness: 320, damping: 28 }}
       className={
         compact
-          ? "fixed inset-x-0 bottom-0 z-30 flex flex-col gap-3 border-t border-edge bg-surface-2/95 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-e3 backdrop-blur-md"
+          ? "relative z-30 flex shrink-0 flex-col gap-3 border-t border-edge bg-surface-2/95 px-3 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-e3 backdrop-blur-md"
           : "pointer-events-auto mx-auto mb-4 flex w-[min(720px,94vw)] flex-col gap-3 rounded-2xl border border-edge bg-surface-2/70 p-3 shadow-e3 backdrop-blur-md"
       }
     >

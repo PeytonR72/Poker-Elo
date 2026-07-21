@@ -56,7 +56,8 @@ export default function ArenaEmblem({
           stroke="var(--color-emerald)"
           strokeOpacity={queued ? 0.9 : 0.5}
           strokeWidth="2.5"
-          strokeDasharray="14 10"
+          pathLength={100}
+          strokeDasharray="15 10"
           strokeLinecap="round"
         />
         <circle

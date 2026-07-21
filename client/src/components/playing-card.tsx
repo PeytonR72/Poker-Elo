@@ -101,33 +101,26 @@ function CardFace({ rank, suit }: { rank: Rank; suit: Suit }) {
 
   let center: React.ReactNode;
   if (COURTS.has(rank)) {
-    // Court: large typographic letter inside a thin inner frame + framing suits.
+    // Court: mirrored suit glyphs (echoing the Ace) behind a center medallion
+    // carrying the rank letter — same badge motif as the card back, so courts
+    // read as a family with the number cards instead of a bare boxed letter.
     center = (
       <g>
-        <rect
-          x={20}
-          y={26}
-          width={60}
-          height={88}
-          rx={7}
-          fill="none"
-          stroke={fill}
-          strokeOpacity={0.28}
-          strokeWidth={1.4}
-        />
-        <Glyph suit={suit} cx={50} cy={40} size={15} fill={fill} />
+        <Glyph suit={suit} cx={50} cy={45} size={32} fill={fill} />
+        <Glyph suit={suit} cx={50} cy={95} size={32} flip fill={fill} />
+        <circle cx={50} cy={70} r={22} fill={CARD_FACE} stroke={fill} strokeOpacity={0.35} strokeWidth={1.4} />
+        <circle cx={50} cy={70} r={16.5} fill="none" stroke={fill} strokeOpacity={0.18} strokeWidth={1} />
         <text
           x={50}
           y={78}
           fontFamily='"Space Grotesk", system-ui, sans-serif'
-          fontSize={46}
-          fontWeight={600}
+          fontSize={24}
+          fontWeight={700}
           textAnchor="middle"
           fill={fill}
         >
           {label}
         </text>
-        <Glyph suit={suit} cx={50} cy={100} size={15} flip fill={fill} />
       </g>
     );
   } else if (rank === "A") {
