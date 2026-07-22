@@ -1,4 +1,4 @@
-import { Server } from "partyserver";
+import { Server, getServerByName } from "partyserver";
 import type { Connection } from "partyserver";
 import {
   encode,
@@ -32,6 +32,7 @@ import type { TableState, PublicView, Action, ActionMask, Seat, EloPlayer } from
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { TurnTimer } from "./timers.js";
 import { decideBotAction, botThinkDelayMs } from "./botRunner.js";
+import { canBecomeSpectator, viewFor, countSpectators } from "./spectator.js";
 import type { Env } from "./env.js";
 
 /** UX pause between hands — not a poker-numeric rule, so defined locally. */
@@ -53,9 +54,11 @@ function nextNonBustedSeat(seats: (Seat | null)[], currentButton: number): numbe
 
 type ConnState = {
   playerId: string; // Supabase user sub (from JWT)
-  seatIndex: number | null; // null until seated
+  seatIndex: number | null; // null until seated (permanently null for spectators)
   authed: boolean;
   timebankMs: number; // milliseconds remaining in timebank
+  spectator: boolean; // true once confirmed as a spectator (never seated, no grace timer)
+  spectateRequested: boolean; // "spectate" arrived before "hello" finished authenticating
 };
 
 /** Validate an action against the legal-actions mask. */
@@ -106,6 +109,7 @@ export default class MatchRoom extends Server<Env> {
   private provisioned = false;
   private provisionedFormat: string | null = null;
   private expectedHumanIds: Set<string> = new Set();
+  private humanRatings: Map<string, number> = new Map(); // playerId -> self-reported rating at enqueue time
   private connectGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // No constructor — Server<Env> supplies this.ctx / this.env / this.name.
@@ -113,9 +117,9 @@ export default class MatchRoom extends Server<Env> {
   override async onRequest(req: Request): Promise<Response> {
     if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     if (this.provisioned || this.tableState !== null) return new Response("OK"); // idempotent
-    let body: { format?: unknown; humanIds?: unknown };
+    let body: { format?: unknown; humanIds?: unknown; humanRatings?: unknown };
     try {
-      body = (await req.json()) as { format?: unknown; humanIds?: unknown };
+      body = (await req.json()) as { format?: unknown; humanIds?: unknown; humanRatings?: unknown };
     } catch {
       return new Response(JSON.stringify({ error: "invalid_json" }), { status: 400 });
     }
@@ -129,6 +133,11 @@ export default class MatchRoom extends Server<Env> {
     this.provisioned = true;
     this.provisionedFormat = format;
     this.expectedHumanIds = new Set(humanIds);
+    if (body.humanRatings && typeof body.humanRatings === "object") {
+      for (const [id, rating] of Object.entries(body.humanRatings as Record<string, unknown>)) {
+        if (typeof rating === "number") this.humanRatings.set(id, rating);
+      }
+    }
     // Start once every expected human connects, or bot-fill after the connect grace.
     // Only start if at least one expected human is actually seated; otherwise leave idle.
     this.connectGraceTimer = setTimeout(() => {
@@ -142,11 +151,25 @@ export default class MatchRoom extends Server<Env> {
   }
 
   override onConnect(conn: Connection): void {
-    this.players.set(conn.id, { playerId: "", seatIndex: null, authed: false, timebankMs: 0 });
+    this.players.set(conn.id, {
+      playerId: "",
+      seatIndex: null,
+      authed: false,
+      timebankMs: 0,
+      spectator: false,
+      spectateRequested: false,
+    });
   }
 
   override onClose(conn: Connection): void {
     const connState = this.players.get(conn.id);
+    // Spectators hold no disconnect-grace timer, no saved timebank, no bot-fill — their
+    // connect/disconnect is invisible to players beyond the spectatorCount broadcast.
+    if (connState?.spectator) {
+      this.players.delete(conn.id);
+      this.broadcastSpectatorCount();
+      return;
+    }
     if (connState?.authed && connState.playerId) {
       const { playerId, seatIndex } = connState;
       this.savedTimebankMs.set(playerId, connState.timebankMs);
@@ -166,6 +189,11 @@ export default class MatchRoom extends Server<Env> {
     // If PartyKit does NOT fire onClose after onError, we need to handle it here too.
     // To be safe, we replicate the grace logic and deduplicate via disconnectTimers.
     const connState = this.players.get(conn.id);
+    if (connState?.spectator) {
+      this.players.delete(conn.id);
+      this.broadcastSpectatorCount();
+      return;
+    }
     if (connState?.authed && connState.playerId && !this.disconnectTimers.has(connState.playerId)) {
       const { playerId, seatIndex } = connState;
       this.savedTimebankMs.set(playerId, connState.timebankMs);
@@ -255,6 +283,26 @@ export default class MatchRoom extends Server<Env> {
       return;
     }
 
+    // Spectate intent — from an already-authed connection, or deferred if "hello" is still
+    // in-flight (both messages can arrive back-to-back before the server has responded to
+    // either; deferring here avoids a race against the "hello" handler below).
+    if (msg.t === "spectate") {
+      const connState = this.players.get(sender.id);
+      if (!connState) return;
+      if (!connState.authed) {
+        connState.spectateRequested = true;
+        return;
+      }
+      if (connState.spectator) return; // already spectating — idempotent no-op
+      const decision = canBecomeSpectator(connState);
+      if (!decision.ok) {
+        sender.send(encode({ t: "error", message: decision.reason }));
+        return;
+      }
+      this.becomeSpectator(sender, connState);
+      return;
+    }
+
     // Only "hello" is accepted as the first message
     if (msg.t !== "hello") {
       sender.send(encode({ t: "error", message: "expected_hello" }));
@@ -298,6 +346,17 @@ export default class MatchRoom extends Server<Env> {
     } catch {
       sender.send(encode({ t: "error", message: "auth_failed" }));
       sender.close();
+      return;
+    }
+
+    state.playerId = playerId;
+    state.authed = true;
+
+    // A "spectate" message that raced ahead of this "hello" completing was deferred —
+    // honor it now, bypassing seat assignment (and the provisioned-room invite gate below)
+    // entirely. Spectators are never seated, so they never hit the reconnect path either.
+    if (state.spectateRequested) {
+      this.becomeSpectator(sender, state);
       return;
     }
 
@@ -388,7 +447,9 @@ export default class MatchRoom extends Server<Env> {
     sender.send(encode({ t: "seated", seatIndex, playerId }));
 
     // Start match when the table is full, or (provisioned) when all invited humans are seated.
-    const authedCount = [...this.players.values()].filter((p) => p.authed).length;
+    // Spectators are authed but never seated — exclude them so their presence can never
+    // block or skew the organic (non-provisioned) fill count.
+    const authedCount = [...this.players.values()].filter((p) => p.authed && !p.spectator).length;
     if (this.provisioned) {
       const seatedExpected = [...this.players.values()].filter(
         (p) => p.authed && this.expectedHumanIds.has(p.playerId),
@@ -455,16 +516,82 @@ export default class MatchRoom extends Server<Env> {
       matchStartMs: this.matchStartMs,
       matchDurationMs: format.matchDurationMs,
     }));
+    this.reportMatchStart();
   }
 
-  /** Send a redacted snapshot to each authed connected player. */
+  /**
+   * Send a redacted snapshot to each authed connected player and spectator. Spectators
+   * always get `viewFor({ spectator: true, ... })` — i.e. `redactFor(null, …)` — never a
+   * seat-holder's view. See `spectator.ts` for the security boundary this enforces.
+   */
   private broadcastSnapshots(): void {
     if (!this.tableState) return;
     for (const [connId, connState] of this.players) {
       if (!connState.authed) continue;
-      const view: PublicView = redactFor(connState.playerId, this.tableState);
+      const view: PublicView = viewFor(connState, this.tableState);
       const found = [...this.getConnections()].find((c) => c.id === connId);
       found?.send(encode({ t: "snapshot", view }));
+    }
+  }
+
+  /** Confirm a connection as a spectator: bootstrap it, then broadcast the new count. */
+  private becomeSpectator(sender: Connection, connState: ConnState): void {
+    connState.spectator = true;
+    connState.seatIndex = null;
+    connState.spectateRequested = false;
+    if (this.tableState) {
+      const view = viewFor(connState, this.tableState);
+      sender.send(encode({ t: "snapshot", view }));
+      const format = MATCH_FORMATS[this.tableState.format];
+      if (format) {
+        sender.send(encode({
+          t: "matchInfo",
+          format: this.tableState.format,
+          matchStartMs: this.matchStartMs,
+          matchDurationMs: format.matchDurationMs,
+        }));
+      }
+    }
+    this.broadcastSpectatorCount();
+  }
+
+  /** Broadcast the current spectator count to every connection — players and spectators. */
+  private broadcastSpectatorCount(): void {
+    this.broadcast(encode({ t: "spectatorCount", n: countSpectators(this.players.values()) }));
+  }
+
+  /** Best-effort: tell the lobby this room's match is live, for the "Live Tables" list. */
+  private reportMatchStart(): void {
+    if (!this.provisioned || !this.tableState) return;
+    const players = [...this.expectedHumanIds].map((id) => ({
+      playerId: id,
+      rating: this.humanRatings.get(id) ?? ELO_DEFAULT_RATING,
+    }));
+    void this.postToLobby({
+      op: "start" as const,
+      roomId: this.name,
+      format: this.tableState.format,
+      startedAt: this.matchStartMs,
+      players,
+    });
+  }
+
+  /** Best-effort: tell the lobby this room's match has ended, so it drops off the list. */
+  private reportMatchEnd(): void {
+    if (!this.provisioned) return;
+    void this.postToLobby({ op: "end" as const, roomId: this.name });
+  }
+
+  private async postToLobby(body: unknown): Promise<void> {
+    try {
+      // See lobby.ts's own getServerByName call site for why this is narrowed to `.fetch()`
+      // only rather than fighting the full generic `Server<Env>` surface at the type level.
+      const stub = (await getServerByName(this.env.LOBBY as never, "global")) as unknown as {
+        fetch: typeof fetch;
+      };
+      await stub.fetch("https://internal/live-match", { method: "POST", body: JSON.stringify(body) });
+    } catch {
+      // Best-effort — the Live Tables list simply won't show/drop this match.
     }
   }
 
@@ -697,6 +824,7 @@ export default class MatchRoom extends Server<Env> {
   private endMatch(): void {
     if (!this.tableState) return;
     this.turnTimer.cancel();
+    this.reportMatchEnd();
 
     const finishPlaceById: Record<string, number> = {};
 
@@ -767,6 +895,11 @@ export default class MatchRoom extends Server<Env> {
   /** Exposed for tests — number of currently tracked connections. */
   get playerCount(): number {
     return this.players.size;
+  }
+
+  /** Exposed for tests — number of currently connected spectators. */
+  get spectatorCount(): number {
+    return countSpectators(this.players.values());
   }
 
   /** Exposed for tests — whether a disconnect grace timer is running for a given playerId. */
