@@ -16,28 +16,30 @@ const WINNER_GLOW_MS_SHOWDOWN = 6_000;
 // Fallback per-turn duration for the timebank ring when a format lookup misses.
 const FALLBACK_TURN_MS = 15_000;
 
-// Six seats on an ellipse, own seat forced to bottom-center (slot 0). Percentages
-// are of the felt container; the ellipse keeps pods clear of the rail on both axes.
-// Top/bottom offsets leave enough headroom for the fixed-pixel pod+card
-// stack (which is centered on each point via translate(-50%,-50%)) so it
-// never clips the felt container's edges, even at the max table height.
+// Six seats on an ellipse, own seat forced to bottom-center (slot 0), the rest
+// spaced 60° apart around it — a symmetric hexagon (2 seats per side + one
+// directly opposite hero at top-center), matching standard 6-max table
+// diagrams. Percentages are of the felt container; top/bottom offsets leave
+// enough headroom for the fixed-pixel pod+card stack (centered on each point
+// via translate(-50%,-50%)) so it never clips the felt container's edges.
 const POSITIONS: Array<React.CSSProperties> = [
   { left: "50%", top: "85%" }, // bottom-center (hero)
-  { left: "13%", top: "76%" }, // bottom-left
-  { left: "4%", top: "34%" }, // top-left
-  { left: "35%", top: "14%" }, // top-center-left
-  { left: "65%", top: "14%" }, // top-center-right
-  { left: "96%", top: "34%" }, // top-right
+  { left: "10%", top: "68%" }, // left-lower
+  { left: "10%", top: "32%" }, // left-upper
+  { left: "50%", top: "15%" }, // top-center
+  { left: "90%", top: "32%" }, // right-upper
+  { left: "90%", top: "68%" }, // right-lower
 ];
 
-// Compact portrait layout: pods pulled inward so nothing clips at ~390px.
+// Compact portrait layout: same symmetric hexagon, pulled inward so nothing
+// clips at ~390px.
 const COMPACT_POSITIONS: Array<React.CSSProperties> = [
-  { left: "50%", top: "86%" },
-  { left: "21%", top: "78%" },
-  { left: "17%", top: "37%" },
-  { left: "40%", top: "14%" },
-  { left: "60%", top: "14%" },
-  { left: "83%", top: "37%" },
+  { left: "50%", top: "86%" }, // bottom-center (hero)
+  { left: "17%", top: "68%" }, // left-lower
+  { left: "17%", top: "32%" }, // left-upper
+  { left: "50%", top: "14%" }, // top-center
+  { left: "83%", top: "32%" }, // right-upper
+  { left: "83%", top: "68%" }, // right-lower
 ];
 
 export default function Table({
