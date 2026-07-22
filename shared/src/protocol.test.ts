@@ -48,3 +48,40 @@ describe("protocol: lobby + matchInfo messages", () => {
     expect(decode<ServerMsg>(encode(found))).toEqual(found);
   });
 });
+
+describe("protocol: spectator messages", () => {
+  it("round-trips a spectate client message", () => {
+    const msg: ClientMsg = { t: "spectate" };
+    expect(decode<ClientMsg>(encode(msg))).toEqual(msg);
+  });
+
+  it("round-trips a spectatorCount server message", () => {
+    const msg: ServerMsg = { t: "spectatorCount", n: 4 };
+    expect(decode<ServerMsg>(encode(msg))).toEqual(msg);
+  });
+
+  it("round-trips a liveMatches request and response", () => {
+    const request: ClientMsg = { t: "liveMatches" };
+    const response: ServerMsg = {
+      t: "liveMatches",
+      matches: [
+        {
+          roomId: "ABC123",
+          format: "turbo",
+          startedAt: 1000,
+          players: [
+            { playerId: "user-1", rating: 500 },
+            { playerId: "user-2", rating: 480 },
+          ],
+        },
+      ],
+    };
+    expect(decode<ClientMsg>(encode(request))).toEqual(request);
+    expect(decode<ServerMsg>(encode(response))).toEqual(response);
+  });
+
+  it("round-trips a liveMatches response with an empty list", () => {
+    const response: ServerMsg = { t: "liveMatches", matches: [] };
+    expect(decode<ServerMsg>(encode(response))).toEqual(response);
+  });
+});

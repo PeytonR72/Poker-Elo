@@ -4,6 +4,20 @@
 import type { ActionMask } from "./engine/legalActions.js";
 import type { GameEvent } from "./engine/types.js";
 
+/** One human player in a live-match listing (see `liveMatches`). */
+export interface LiveMatchPlayer {
+  playerId: string;
+  rating: number;
+}
+
+/** A currently-running match, as registered by its `MatchRoom` with the lobby. */
+export interface LiveMatchInfo {
+  roomId: string;
+  format: string;
+  startedAt: number;
+  players: LiveMatchPlayer[];
+}
+
 export type ClientMsg =
   | { t: "hello"; jwt: string }
   | { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number }
@@ -11,7 +25,9 @@ export type ClientMsg =
   | { t: "ping"; ts: number }
   | { t: "startMatch" }
   | { t: "enqueue"; rating: number; format: string }
-  | { t: "leave" };
+  | { t: "leave" }
+  | { t: "spectate" }
+  | { t: "liveMatches" };
 
 export type ServerMsg =
   | { t: "seated"; seatIndex: number; playerId: string }
@@ -24,6 +40,8 @@ export type ServerMsg =
   | { t: "matchInfo"; format: string; matchStartMs: number; matchDurationMs: number }
   | { t: "queueStatus"; waiting: number; position: number; etaSec: number }
   | { t: "matchFound"; roomId: string; format: string }
+  | { t: "spectatorCount"; n: number }
+  | { t: "liveMatches"; matches: LiveMatchInfo[] }
   | { t: "error"; message: string };
 
 export function encode(msg: ClientMsg | ServerMsg): string {
