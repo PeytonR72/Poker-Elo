@@ -11,7 +11,7 @@ type ActionType = "fold" | "check" | "call" | "raise";
 // before revealing the next street's card(s), instead of jump-cutting straight to it.
 const POST_STREET_PAUSE_MS = 1_500;
 
-export function useMatchSocket(roomId: string, getJwt: () => string | null) {
+export function useMatchSocket(roomId: string, getJwt: () => string | null, spectator = false) {
   const [state, dispatch] = useReducer(matchReducer, initialMatchState);
   const sockRef = useRef<PartySocket | null>(null);
   const seatRef = useRef<number | null>(null);
@@ -24,7 +24,9 @@ export function useMatchSocket(roomId: string, getJwt: () => string | null) {
     readyAtRef.current = 0;
     socket.addEventListener("open", () => {
       const jwt = getJwt();
-      if (jwt) socket.send(encode({ t: "hello", jwt }));
+      if (!jwt) return;
+      socket.send(encode({ t: "hello", jwt }));
+      if (spectator) socket.send(encode({ t: "spectate" }));
     });
     socket.addEventListener("message", (e: MessageEvent) => {
       const msg = decode<ServerMsg>(e.data as string);

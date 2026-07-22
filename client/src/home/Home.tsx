@@ -17,7 +17,7 @@ export default function Home({
   ratingRefreshKey,
 }: {
   auth: SessionApi;
-  onMatchFound: (roomId: string, format: string) => void;
+  onMatchFound: (roomId: string, format: string, spectator?: boolean) => void;
   ratingRefreshKey: number;
 }) {
   const [tab, setTab] = useState<Tab>("play");
@@ -79,6 +79,7 @@ export default function Home({
               toast.success("Match found — taking your seat");
               onMatchFound(roomId, format);
             }}
+            onWatch={(roomId, format) => onMatchFound(roomId, format, true)}
           />
         )}
         {tab === "leaderboard" && (

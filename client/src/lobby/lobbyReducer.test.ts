@@ -14,6 +14,16 @@ describe("lobbyReducer", () => {
     expect(s.match).toEqual({ roomId: "ABC123", format: "turbo" });
   });
 
+  it("stores the live-matches list and clears a stale error", () => {
+    const s1 = lobbyReducer(initialLobbyState, { t: "error", message: "auth_failed" });
+    const matches = [
+      { roomId: "ABC123", format: "turbo", startedAt: 1000, players: [{ playerId: "u1", rating: 500 }] },
+    ];
+    const s2 = lobbyReducer(s1, { t: "liveMatches", matches });
+    expect(s2.liveMatches).toEqual(matches);
+    expect(s2.error).toBeNull();
+  });
+
   it("captures an error", () => {
     const s = lobbyReducer(initialLobbyState, { t: "error", message: "auth_failed" });
     expect(s.error).toBe("auth_failed");

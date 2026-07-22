@@ -11,6 +11,8 @@ export interface MatchUiState {
   error: string | null;
   lastEvent: GameEvent | null;
   actionBySeat: Record<number, { action: string; amount: number } | undefined>;
+  /** Number of connected spectators (players and spectators both receive this). */
+  spectatorCount: number;
   /** Snapshot of the seats awarded a pot in the most recently *completed* hand. */
   winners: number[];
   /** Whether that most recently completed hand went to showdown. */
@@ -33,6 +35,7 @@ export const initialMatchState: MatchUiState = {
   error: null,
   lastEvent: null,
   actionBySeat: {},
+  spectatorCount: 0,
   winners: [],
   showdownThisHand: false,
   handCompleteSeq: 0,
@@ -109,6 +112,8 @@ export function matchReducer(state: MatchUiState, msg: ServerMsg): MatchUiState 
       }
       return { ...state, lastEvent: event, error: null };
     }
+    case "spectatorCount":
+      return { ...state, spectatorCount: msg.n, error: null };
     case "matchOver":
       return {
         ...state,

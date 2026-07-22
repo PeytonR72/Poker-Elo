@@ -80,6 +80,13 @@ describe("matchReducer", () => {
     expect(s2.turn).toBeNull();
   });
 
+  it("stores the spectator count and clears a stale error", () => {
+    const s1 = run([{ t: "error", message: "not_your_turn" }]);
+    const s2 = matchReducer(s1, { t: "spectatorCount", n: 3 });
+    expect(s2.spectatorCount).toBe(3);
+    expect(s2.error).toBeNull();
+  });
+
   it("captures an error message", () => {
     const s = run([{ t: "error", message: "not_your_turn" }]);
     expect(s.error).toBe("not_your_turn");

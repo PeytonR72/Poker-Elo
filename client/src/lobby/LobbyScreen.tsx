@@ -17,6 +17,7 @@ import MatchFoundOverlay from "./MatchFoundOverlay.js";
 import RecentMatchesStrip from "./RecentMatchesStrip.js";
 import RatingSparklineCard from "./RatingSparklineCard.js";
 import TierProgressCard from "./TierProgressCard.js";
+import LiveTablesCard from "./LiveTablesCard.js";
 
 /** Seconds → "m:ss". */
 function formatElapsed(totalSec: number): string {
@@ -31,10 +32,12 @@ export default function LobbyScreen({
   auth,
   rating,
   onMatchFound,
+  onWatch,
 }: {
   auth: SessionApi;
   rating: number;
   onMatchFound: (roomId: string, format: string) => void;
+  onWatch: (roomId: string, format: string) => void;
 }) {
   const reduced = useReducedMotion();
   const { state, connStatus, enqueue, leave } = useLobbySocket(auth.getJwt);
@@ -165,12 +168,13 @@ export default function LobbyScreen({
       </div>
 
       {/* ── Lower cards (fills the void) ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         <div className="lg:col-span-1">
           <RecentMatchesStrip entries={strip} loading={historyLoading} error={historyError} />
         </div>
         <RatingSparklineCard rating={rating} series={series} loading={historyLoading} />
         <TierProgressCard rating={rating} seed={auth.userId ?? "player"} />
+        <LiveTablesCard matches={state.liveMatches} onWatch={onWatch} />
       </div>
 
       <AnimatePresence>

@@ -1,4 +1,4 @@
-import type { ServerMsg } from "@poker/shared";
+import type { ServerMsg, LiveMatchInfo } from "@poker/shared";
 
 export interface LobbyUiState {
   status: "idle" | "queued" | "matched";
@@ -7,6 +7,7 @@ export interface LobbyUiState {
   etaSec: number;
   match: { roomId: string; format: string } | null;
   error: string | null;
+  liveMatches: LiveMatchInfo[];
 }
 
 /**
@@ -27,6 +28,7 @@ export const initialLobbyState: LobbyUiState = {
   etaSec: 0,
   match: null,
   error: null,
+  liveMatches: [],
 };
 
 /** Clear a stale error without allocating a new object when there is none. */
@@ -55,6 +57,8 @@ export function lobbyReducer(state: LobbyUiState, action: LobbyAction): LobbyUiS
         match: { roomId: action.roomId, format: action.format },
         error: null,
       };
+    case "liveMatches":
+      return { ...state, liveMatches: action.matches, error: null };
     case "error":
       return { ...state, error: action.message };
     default:

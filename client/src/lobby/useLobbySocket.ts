@@ -7,6 +7,10 @@ import { lobbyReducer, initialLobbyState } from "./lobbyReducer.js";
 
 export type LobbyConnStatus = "connecting" | "open" | "closed";
 
+// The lobby only answers liveMatches on request (no push updates), so poll for a
+// reasonably fresh "Live Tables" list while the socket is open.
+const LIVE_MATCHES_POLL_MS = 15_000;
+
 export function useLobbySocket(getJwt: () => string | null) {
   const [state, dispatch] = useReducer(lobbyReducer, initialLobbyState);
   const [connStatus, setConnStatus] = useState<LobbyConnStatus>("connecting");
@@ -21,14 +25,23 @@ export function useLobbySocket(getJwt: () => string | null) {
       // will surface a fresh error only if it genuinely fails.
       dispatch({ t: "connected" });
       const jwt = getJwt();
-      if (jwt) socket.send(encode({ t: "hello", jwt }));
+      if (jwt) {
+        socket.send(encode({ t: "hello", jwt }));
+        socket.send(encode({ t: "liveMatches" }));
+      }
     });
     socket.addEventListener("close", () => setConnStatus("closed"));
     socket.addEventListener("error", () => setConnStatus("closed"));
     socket.addEventListener("message", (e: MessageEvent) => {
       dispatch(decode<ServerMsg>(e.data as string));
     });
-    return () => socket.close();
+    const poll = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(encode({ t: "liveMatches" }));
+    }, LIVE_MATCHES_POLL_MS);
+    return () => {
+      clearInterval(poll);
+      socket.close();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

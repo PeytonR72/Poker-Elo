@@ -13,7 +13,7 @@ const loadingScreen = (
 
 export default function App() {
   const auth = useSession();
-  const [match, setMatch] = useState<{ roomId: string; format: string } | null>(null);
+  const [match, setMatch] = useState<{ roomId: string; format: string; spectator?: boolean } | null>(null);
   const [ratingRefreshKey, setRatingRefreshKey] = useState(0);
 
   let screenKey: string;
@@ -33,9 +33,11 @@ export default function App() {
           roomId={match.roomId}
           getJwt={auth.getJwt}
           ownId={auth.userId}
+          spectator={match.spectator}
           onLeave={() => {
             setMatch(null);
-            setRatingRefreshKey((k) => k + 1);
+            // A spectator never played, so there's no personal rating to have moved.
+            if (!match.spectator) setRatingRefreshKey((k) => k + 1);
           }}
         />
       </Suspense>
@@ -43,7 +45,11 @@ export default function App() {
   } else {
     screenKey = "home";
     screen = (
-      <Home auth={auth} onMatchFound={(roomId, format) => setMatch({ roomId, format })} ratingRefreshKey={ratingRefreshKey} />
+      <Home
+        auth={auth}
+        onMatchFound={(roomId, format, spectator) => setMatch({ roomId, format, spectator })}
+        ratingRefreshKey={ratingRefreshKey}
+      />
     );
   }
 

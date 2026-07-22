@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { LogOut } from "lucide-react";
+import { LogOut, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useMatchSocket } from "./useMatchSocket.js";
 import { usePlayerNames } from "./usePlayerNames.js";
@@ -17,21 +17,25 @@ export default function GameScreen({
   roomId,
   getJwt,
   ownId,
+  spectator = false,
   onLeave,
 }: {
   roomId: string;
   getJwt: () => string | null;
   ownId: string | null;
+  /** Watch-only mode: no seat, no action bar, no hero hole cards, ever. */
+  spectator?: boolean;
   onLeave: () => void;
 }) {
-  const { state, sendAction } = useMatchSocket(roomId, getJwt);
+  const { state, sendAction } = useMatchSocket(roomId, getJwt, spectator);
   const compact = useIsCompact();
   const names = usePlayerNames(state.view?.seats.map((s) => s?.id) ?? []);
 
-  // Fire a match-end toast with the hero's rating delta exactly once.
+  // Fire a match-end toast with the hero's rating delta exactly once. Spectators never
+  // participated, so there's no personal delta to announce.
   const toasted = useRef(false);
   useEffect(() => {
-    if (!state.result || toasted.current) return;
+    if (!state.result || toasted.current || spectator) return;
     toasted.current = true;
     const delta = ownId ? (state.result.eloDeltas[ownId] ?? 0) : 0;
     const place = ownId ? state.result.finishPlaceById[ownId] : undefined;
@@ -39,7 +43,7 @@ export default function GameScreen({
     toast(place === 1 ? "You won the match!" : "Match complete", {
       description: `Rating ${sign}${delta}`,
     });
-  }, [state.result, ownId]);
+  }, [state.result, ownId, spectator]);
 
   if (state.result) {
     return (
@@ -90,6 +94,14 @@ export default function GameScreen({
             matchDurationMs={state.matchInfo.matchDurationMs}
           />
         )}
+        {spectator && (
+          <div className="flex items-center gap-1.5 rounded-full border border-edge bg-surface-2 px-2.5 py-1 text-stat text-xs text-neutral-300">
+            <Eye className="h-3 w-3 text-emerald" />
+            <span className="text-neutral-400">SPECTATING</span>
+            <span className="text-neutral-600">·</span>
+            <span>{state.spectatorCount}</span>
+          </div>
+        )}
         <div className="flex-1" />
         <Button variant="ghost" size="icon-sm" onClick={onLeave} aria-label="Leave match">
           <LogOut className="h-4 w-4" />
@@ -101,8 +113,9 @@ export default function GameScreen({
         <Table state={state} names={names} compact={compact} />
       </div>
 
-      {/* Action zone */}
-      {state.turn && view ? (
+      {/* Action zone — spectators never get one, not even the idle waiting strip, so
+          there's no dead space where the action bar would otherwise sit. */}
+      {spectator ? null : state.turn && view ? (
         <ActionBar
           mask={state.turn.mask}
           currentBet={view.currentBet}
