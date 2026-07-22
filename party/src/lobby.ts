@@ -11,6 +11,8 @@ import {
 import { verifyJwt, parseDevToken } from "./auth.js";
 import { formMatches, botFillEtaSec } from "./matchmaker.js";
 import type { Waiter } from "./matchmaker.js";
+import { registerStart, registerEnd, listLive } from "./liveMatches.js";
+import type { StoredLiveMatch } from "./liveMatches.js";
 import type { Env } from "./env.js";
 
 type ConnState = { playerId: string; authed: boolean };
@@ -21,9 +23,48 @@ export default class Lobby extends Server<Env> {
   private conns = new Map<string, ConnState>(); // conn.id → state
   private waiters = new Map<string, Waiter & { connId: string }>(); // playerId → waiter
   private ticker: ReturnType<typeof setInterval> | null = null;
+  private liveMatches = new Map<string, StoredLiveMatch>(); // roomId → entry, reported by MatchRoom
 
   override onConnect(conn: Connection): void {
     this.conns.set(conn.id, { playerId: "", authed: false });
+  }
+
+  /** Internal channel: a MatchRoom reporting its match's start/end (see matchRoom.ts's postToLobby). */
+  override async onRequest(req: Request): Promise<Response> {
+    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "invalid_json" }), { status: 400 });
+    }
+    const b = body as {
+      op?: unknown;
+      roomId?: unknown;
+      format?: unknown;
+      startedAt?: unknown;
+      players?: unknown;
+    };
+    if (typeof b.roomId !== "string") return new Response(JSON.stringify({ error: "bad_roomId" }), { status: 400 });
+
+    if (b.op === "start") {
+      const format = typeof b.format === "string" ? b.format : null;
+      const fmt = format ? MATCH_FORMATS[format] : undefined;
+      const players = Array.isArray(b.players)
+        ? b.players.filter(
+            (p): p is { playerId: string; rating: number } =>
+              typeof p === "object" && p !== null &&
+              typeof (p as { playerId?: unknown }).playerId === "string" &&
+              typeof (p as { rating?: unknown }).rating === "number",
+          )
+        : [];
+      if (fmt && format && typeof b.startedAt === "number") {
+        registerStart(this.liveMatches, { roomId: b.roomId, format, startedAt: b.startedAt, players }, fmt.matchDurationMs, Date.now());
+      }
+    } else if (b.op === "end") {
+      registerEnd(this.liveMatches, b.roomId);
+    }
+    return new Response("OK");
   }
 
   override onClose(conn: Connection): void {
@@ -89,6 +130,11 @@ export default class Lobby extends Server<Env> {
       if (this.waiters.size === 0) this.stopTicker();
       return;
     }
+
+    if (msg.t === "liveMatches") {
+      sender.send(encode({ t: "liveMatches", matches: listLive(this.liveMatches, Date.now()) }));
+      return;
+    }
   }
 
   private async authenticate(jwt: string | undefined): Promise<string | null> {
@@ -149,9 +195,14 @@ export default class Lobby extends Server<Env> {
         const stub = (await getServerByName(this.env.MAIN as never, roomId)) as unknown as {
           fetch: typeof fetch;
         };
+        const humanRatings: Record<string, number> = {};
+        for (const id of match.humanIds) {
+          const w = this.waiters.get(id);
+          if (w) humanRatings[id] = w.rating;
+        }
         res = await stub.fetch("https://internal/provision", {
           method: "POST",
-          body: JSON.stringify({ format: match.format, humanIds: match.humanIds }),
+          body: JSON.stringify({ format: match.format, humanIds: match.humanIds, humanRatings }),
         });
       } catch {
         continue; // provisioning failed — leave players queued for the next tick
