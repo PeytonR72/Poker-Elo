@@ -25,8 +25,10 @@ export function useMatchSocket(roomId: string, getJwt: () => string | null, spec
     socket.addEventListener("open", () => {
       const jwt = getJwt();
       if (!jwt) return;
-      socket.send(encode({ t: "hello", jwt }));
-      if (spectator) socket.send(encode({ t: "spectate" }));
+      // The spectate flag rides on "hello" itself so the server decides the role
+      // atomically at auth time, with no window for a follow-up message to race against
+      // seat assignment (auth can complete fully synchronously — e.g. dev tokens).
+      socket.send(encode({ t: "hello", jwt, spectate: spectator || undefined }));
     });
     socket.addEventListener("message", (e: MessageEvent) => {
       const msg = decode<ServerMsg>(e.data as string);

@@ -55,6 +55,11 @@ describe("protocol: spectator messages", () => {
     expect(decode<ClientMsg>(encode(msg))).toEqual(msg);
   });
 
+  it("round-trips a hello message with the spectate flag set", () => {
+    const msg: ClientMsg = { t: "hello", jwt: "dev:u1", spectate: true };
+    expect(decode<ClientMsg>(encode(msg))).toEqual(msg);
+  });
+
   it("round-trips a spectatorCount server message", () => {
     const msg: ServerMsg = { t: "spectatorCount", n: 4 };
     expect(decode<ServerMsg>(encode(msg))).toEqual(msg);

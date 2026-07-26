@@ -19,7 +19,11 @@ export interface LiveMatchInfo {
 }
 
 export type ClientMsg =
-  | { t: "hello"; jwt: string }
+  // `spectate` on hello is the deterministic way to opt out of seat assignment: it's
+  // decided atomically as part of authentication, not via a second message that could
+  // race against it (auth can complete synchronously — e.g. dev tokens — leaving no
+  // window for a follow-up message to arrive in time).
+  | { t: "hello"; jwt: string; spectate?: boolean }
   | { t: "action"; seat: number; action: "fold" | "check" | "call" | "raise"; amount?: number }
   | { t: "sitOut" }
   | { t: "ping"; ts: number }

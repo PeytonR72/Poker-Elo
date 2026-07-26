@@ -58,7 +58,6 @@ type ConnState = {
   authed: boolean;
   timebankMs: number; // milliseconds remaining in timebank
   spectator: boolean; // true once confirmed as a spectator (never seated, no grace timer)
-  spectateRequested: boolean; // "spectate" arrived before "hello" finished authenticating
 };
 
 /** Validate an action against the legal-actions mask. */
@@ -157,7 +156,6 @@ export default class MatchRoom extends Server<Env> {
       authed: false,
       timebankMs: 0,
       spectator: false,
-      spectateRequested: false,
     });
   }
 
@@ -208,9 +206,9 @@ export default class MatchRoom extends Server<Env> {
 
   override async onMessage(sender: Connection, raw: string | ArrayBuffer): Promise<void> {
     // Decode — throws if not valid JSON with a t field
-    let msg: { t: string; jwt?: string };
+    let msg: { t: string; jwt?: string; spectate?: boolean };
     try {
-      msg = decode<{ t: string; jwt?: string }>(raw as string);
+      msg = decode<{ t: string; jwt?: string; spectate?: boolean }>(raw as string);
     } catch {
       sender.send(encode({ t: "error", message: "invalid_message" }));
       sender.close();
@@ -283,14 +281,16 @@ export default class MatchRoom extends Server<Env> {
       return;
     }
 
-    // Spectate intent — from an already-authed connection, or deferred if "hello" is still
-    // in-flight (both messages can arrive back-to-back before the server has responded to
-    // either; deferring here avoids a race against the "hello" handler below).
+    // Standalone spectate intent, for an already-authed-but-unseated connection (the
+    // primary path is the `spectate` flag on `hello` below, which is decided atomically
+    // as part of authentication — this exists for completeness/API symmetry, not as a
+    // race-dependent mechanism: auth can complete fully synchronously (e.g. dev tokens),
+    // leaving no window for a follow-up message to land before seat assignment runs.
     if (msg.t === "spectate") {
       const connState = this.players.get(sender.id);
       if (!connState) return;
       if (!connState.authed) {
-        connState.spectateRequested = true;
+        sender.send(encode({ t: "error", message: "not_authed" }));
         return;
       }
       if (connState.spectator) return; // already spectating — idempotent no-op
@@ -352,10 +352,12 @@ export default class MatchRoom extends Server<Env> {
     state.playerId = playerId;
     state.authed = true;
 
-    // A "spectate" message that raced ahead of this "hello" completing was deferred —
-    // honor it now, bypassing seat assignment (and the provisioned-room invite gate below)
-    // entirely. Spectators are never seated, so they never hit the reconnect path either.
-    if (state.spectateRequested) {
+    // The spectate flag is decided atomically as part of this same "hello" — no race
+    // against seat assignment is possible, unlike a follow-up message (auth above can
+    // complete fully synchronously, e.g. for dev tokens, leaving no window for one).
+    // Bypasses seat assignment and the provisioned-room invite gate below entirely;
+    // spectators are never seated, so they never hit the reconnect path either.
+    if (msg.spectate === true) {
       this.becomeSpectator(sender, state);
       return;
     }
@@ -538,7 +540,6 @@ export default class MatchRoom extends Server<Env> {
   private becomeSpectator(sender: Connection, connState: ConnState): void {
     connState.spectator = true;
     connState.seatIndex = null;
-    connState.spectateRequested = false;
     if (this.tableState) {
       const view = viewFor(connState, this.tableState);
       sender.send(encode({ t: "snapshot", view }));
