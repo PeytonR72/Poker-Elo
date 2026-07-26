@@ -42,7 +42,7 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 | `constants.ts` | `STARTING_STACK`, `TABLE_SIZE`, `MATCH_FORMATS`, `MATCH_CODE_LENGTH`, `RANK_TIERS`, `ELO_*`, `BOT_*`, `TIMEBANK_*`, `RANKED_MIN_ONLINE`, `QUEUE_MATCH_INTERVAL_MS`, `RATING_WINDOW_*`, `DISCONNECT_GRACE_MS`, `DEFAULT_FORMAT`, `HEADS_UP_EARLY_END`, `MATCH_GRACE_FINISH`, `RANKS`, `SUITS` |
 | `cards.ts` | `Card`, `makeCard`, `rankOf`, `suitOf`, `cardToString`, `cardFromString` |
 | `deck.ts` | `fullDeck`, `shuffledDeck` |
-| `protocol.ts` | `ClientMsg` (game: `hello`/`action`/`sitOut`/`ping`/`startMatch`; lobby: `enqueue`/`leave`), `ServerMsg` (game: `seated`/`dealPrivate`/`snapshot`/`event`/`yourTurn`/`timebankUsed`/`matchOver`/`matchInfo`/`error`; lobby: `queueStatus`/`matchFound`), `encode`, `decode` |
+| `protocol.ts` | `ClientMsg` (game: `hello` — takes an optional `spectate` flag, decided atomically at auth time — /`action`/`sitOut`/`ping`/`startMatch`/`spectate` (standalone, for an already-authed-but-unseated connection); lobby: `enqueue`/`leave`/`liveMatches`), `ServerMsg` (game: `seated`/`dealPrivate`/`snapshot`/`event`/`yourTurn`/`timebankUsed`/`matchOver`/`matchInfo`/`spectatorCount`/`error`; lobby: `queueStatus`/`matchFound`/`liveMatches`), `LiveMatchInfo`, `LiveMatchPlayer`, `encode`, `decode` |
 | `handEval/index.ts` | `HandCategory`, `evaluate5`, `evaluate7`, `evaluate7Naive`, `pack` |
 | `engine/types.ts` | `Action`, `ActionType`, `ActionMask`, `GameEvent`, `Seat`, `SeatStatus`, `TableState`, `Street`, `Pot` |
 | `engine/state.ts` | `createSeat`, `createHand`, `cloneState` |
@@ -61,9 +61,11 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
 | File | Exports / Role |
 |---|---|
-| `matchRoom.ts` | `MatchRoom` — `partyserver` `Server<Env>` Durable Object (the `MAIN` binding); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds }`), roster-aware start + bot-fill, `matchInfo` broadcast |
-| `lobby.ts` | `Lobby` — `partyserver` `Server<Env>` Durable Object (the `LOBBY` binding); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `getServerByName(this.env.MAIN, roomId)`, sends `queueStatus`/`matchFound` |
+| `matchRoom.ts` | `MatchRoom` — `partyserver` `Server<Env>` Durable Object (the `MAIN` binding); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds, humanRatings? }`), roster-aware start + bot-fill, `matchInfo` broadcast, **spectator role** (see `spectator.ts`), reports match start/end to the lobby's live-match registry (best-effort `onRequest` POST to `LOBBY`) |
+| `lobby.ts` | `Lobby` — `partyserver` `Server<Env>` Durable Object (the `LOBBY` binding); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `getServerByName(this.env.MAIN, roomId)`, sends `queueStatus`/`matchFound`; **live-match registry** (see `liveMatches.ts`) — `onRequest` accepts `MatchRoom`'s start/end reports, `liveMatches` client message answers with the current list |
 | `matchmaker.ts` | `formMatches(waiters, now, onlineCount)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch` |
+| `spectator.ts` | `canBecomeSpectator`, `viewFor`, `countSpectators` — pure spectator decision logic, unit-tested (see `spectator.test.ts`); `viewFor` is the security boundary: spectators always get `redactFor(null, …)`, never a seat-holder's view |
+| `liveMatches.ts` | `registerStart`, `registerEnd`, `listLive`, `LIVE_MATCH_STALE_MARGIN_MS` — pure in-memory live-match registry (roomId → entry), unit-tested; `listLive` self-heals by sweeping expired entries on read |
 | `auth.ts` | `verifyJwt(token, { secret?, supabaseUrl?, jwks? })` — dispatches on the JWT's own `alg` header: `HS256` verifies against `secret` (legacy Supabase projects), anything else (e.g. `ES256`) verifies against `jwks` if provided (test injection point), else `${supabaseUrl}/auth/v1/.well-known/jwks.json`. `parseDevToken("dev:<id>")` |
 | `env.ts` | `Env` — typed Durable Object bindings (`MAIN`, `LOBBY`) + secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_TOKENS`) |
 | `worker.ts` | The Worker `fetch` entrypoint — delegates to `partyserver`'s `routePartykitRequest`; exports `MatchRoom`/`Lobby` as the deployed Durable Object classes |
@@ -86,6 +88,15 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
   (`DISCONNECT_GRACE_MS`) bot-fills missing humans but does **not** start an all-bot match (zero
   humans seated → room stays idle). `makeRoomCode` uses `Math.random` (room codes are not
   deck-secret; rooms enforce the roster).
+- **Spectator role:** anyone signed in can watch a live match without a seat. The `spectate` flag
+  rides on `hello` itself (`{ t: "hello", jwt, spectate?: boolean }`), decided atomically as part
+  of authentication — NOT via a follow-up message, because auth can complete fully synchronously
+  (e.g. dev tokens never `await`), leaving no window for a second message to race seat assignment.
+  A spectator connection is never seated, never affects matchmaking/bot-fill, and holds no
+  disconnect-grace timer or saved timebank (`onClose`/`onError` branch on the spectator flag before
+  any of that runs). `spectatorCount` broadcasts to every connection (players and spectators) on
+  change. The security-critical piece — spectators must never see hole cards before showdown — is
+  `viewFor` in `spectator.ts` (`redactFor(null, …)` always, never a seat-holder's view).
 - **No automated tests for `matchRoom.ts`/`lobby.ts`.** `partyserver`'s `Server` class imports
   Cloudflare's `cloudflare:workers` built-in at module load time, which crashes under plain
   Node/Vitest regardless of mocking strategy (confirmed across multiple investigation attempts,
@@ -94,25 +105,33 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
   careful diff review for any change, plus a manual/scripted `wrangler dev` integration check
   (see `docs/deploy-partyserver-cloudflare.md` and the partyserver-migration plan under
   `docs/superpowers/plans/` for the pattern) before any deploy. `auth.ts`/`matchmaker.ts`/
-  `timers.ts`/`botRunner.ts` have no PartyKit/partyserver dependency and keep normal Vitest
-  coverage.
+  `timers.ts`/`botRunner.ts`/`spectator.ts`/`liveMatches.ts` have no PartyKit/partyserver
+  dependency and keep normal Vitest coverage — pull new server-side decision logic into a plain
+  function in one of these rather than inlining it in `matchRoom.ts`/`lobby.ts` wherever practical,
+  specifically so it stays testable. The Unit 10 `wrangler dev` integration check (2 players + 1
+  spectator) caught a real bug this way: a first design deferred the spectate decision to a
+  follow-up message assuming `hello`'s auth always yields — false for dev tokens, so the spectator
+  connection got silently auto-seated as a real player. Fixed by moving the decision onto `hello`
+  itself (see above) — a reminder that a security boundary must never depend on message-arrival
+  timing, only integration-level testing surfaced it.
 
 ## `client/src` module map
 
 | File | Exports / Role |
 |---|---|
-| `App.tsx` | Screen router: loading → `AuthScreen` → (`match` set) `GameScreen` → else `Home` |
+| `App.tsx` | Screen router: loading → `AuthScreen` → (`match` set, `{ roomId, format, spectator? }`) `GameScreen` → else `Home` |
 | `lib/env.ts` | `PARTYKIT_HOST`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `isDevHost()` (exact-hostname match) |
 | `lib/supabase.ts` | configured `supabase` client |
 | `auth/useSession.ts` | Supabase session hook; `getJwt()` → `dev:<id>` on local host, else `access_token` |
 | `auth/AuthScreen.tsx` | email/password sign-in/up |
-| `lobby/lobbyReducer.ts` | **pure** `lobbyReducer` (lobby `ServerMsg` → `LobbyUiState`) — tested |
-| `lobby/useLobbySocket.ts` | connects to `lobby` party, enqueue/leave |
-| `lobby/LobbyScreen.tsx` | rating/rank (from `profiles`), queue UI |
-| `game/matchReducer.ts` | **pure** `matchReducer` (game `ServerMsg` → `MatchUiState`) — tested |
+| `lobby/lobbyReducer.ts` | **pure** `lobbyReducer` (lobby `ServerMsg` → `LobbyUiState`, incl. `liveMatches`) — tested |
+| `lobby/useLobbySocket.ts` | connects to `lobby` party, enqueue/leave, requests `liveMatches` on connect + polls every 15s (lobby only answers on request, no push) |
+| `lobby/LobbyScreen.tsx` | rating/rank (from `profiles`), queue UI, `onWatch` → spectate a live match |
+| `lobby/LiveTablesCard.tsx` | "Live Tables" module (Arena lower row) — format badge, player names/ratings (via `usePlayerNames`), elapsed time, Watch button; empty state "No live tables right now." |
+| `game/matchReducer.ts` | **pure** `matchReducer` (game `ServerMsg` → `MatchUiState`, incl. `spectatorCount`) — tested |
 | `game/viewHelpers.ts` | **pure** `maskToButtons`, `clampRaiseTo` (raise-TO), `blindLevelLabel`, `formatCard`, `formatChips` — tested |
-| `game/useMatchSocket.ts` | connects to `main` room, `hello` + `sendAction` |
-| `game/*.tsx` | `GameScreen`, `Table` (felt), `SeatView`, `Board`, `CardView`, `ActionBar`, `MatchClock`, `MatchOver` |
+| `game/useMatchSocket.ts` | connects to `main` room, `hello` (with an optional `spectate` flag) + `sendAction` |
+| `game/*.tsx` | `GameScreen` (`spectator?: boolean` prop — hides the action bar/waiting strip entirely, shows a SPECTATING pill + count, never renders hero hole cards), `Table` (felt, symmetric 6-max hexagon layout), `SeatView`, `Board`, `CardView`, `ActionBar`, `MatchClock`, `MatchOver` |
 | `data/displayName.ts` | `displayName` — player label (bot glyph / username / `player_<8>`) |
 | `data/leaderboard.ts` | `ProfileRow`, `LeaderboardEntry`, `Leaderboard`, `buildLeaderboard` |
 | `data/profile.ts` | `MatchResultRow`, `ProfileHeader`, `ProfileHistoryEntry`, `ProfileData`, `buildProfile` |
@@ -173,7 +192,7 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
 - **Client**: https://poker-elo.vercel.app (Vercel, production). Build: `npm run build --workspace @poker/client` from repo root; output `client/dist`. Env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PARTYKIT_HOST`) set in Vercel project `peytonr7272-gmailcoms-projects/client`.
 - **Supabase**: live project `wydnwnitnexifndwdsmg` (us-west-2). Both migrations applied. `report-match` edge function deployed and ACTIVE.
 - **`party/` (game server)**: live cloud-prem at `party.pokerelo.us`, deployed via `wrangler` (Cloudflare's own CLI) to the user's own Cloudflare account — `partykit`/`partykit.json` are gone from this repo entirely. Runs on the Workers **Free** plan (SQLite-backed Durable Objects via an explicit `new_sqlite_classes` migration in `party/wrangler.jsonc` — the `partykit` CLI could not generate this migration type for cloud-prem deploys, which is why this repo moved off it; see `docs/deploy-partyserver-cloudflare.md`). Secrets (`SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are set via `wrangler secret put`; `DEV_TOKENS` is intentionally never set in production (its absence is what makes `dev:<id>` tokens rejected — verify with the smoke test in the runbook after every deploy). `VITE_PARTYKIT_HOST` on Vercel points at `party.pokerelo.us`.
-- **Local dev**: `npm run dev` inside `party/` (now `wrangler dev`, not `npx partykit dev`) — needs a local `party/.dev.vars` with `DEV_TOKENS=true` (git-ignored).
+- **Local dev**: `npm run dev` inside `party/` (now `wrangler dev`, not `npx partykit dev`) — needs a local `party/.dev.vars` with `DEV_TOKENS=true` (git-ignored). `wrangler dev` listens on `localhost:8787` by default; `client/.env`'s `VITE_PARTYKIT_HOST` must point there for local dev to reach it (fixed in Unit 10 — was still `localhost:1999` from the pre-Unit-8 `partykit` era).
 
 ## Status
 
@@ -224,12 +243,32 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
   `createLocalJWKSet`, instead of only against live production traffic. Root `npm test` is now 224
   tests (221 + 3 new ES256/JWKS success-path cases).
 
-**Not yet done / next:** `client/.env`'s `VITE_PARTYKIT_HOST` (and `.env.example`) still say the
-pre-Unit-8 `partykit`-era `localhost:1999`; local `wrangler dev` actually listens on
-`localhost:8787` by default, so the env value needs updating for local dev to reach the party
-server (see `handoff.md` known gaps). Further bundle splitting (`manualChunks` for
+- **Unit 10** — Spectator mode: anyone signed in can watch a live match without a seat.
+  `shared/src/protocol.ts` gained `spectate` (an optional flag on `hello`, decided atomically at
+  auth time — see `party/` conventions above for why NOT a follow-up message), `spectatorCount`,
+  and `liveMatches` (client request / server response, plus `LiveMatchInfo`/`LiveMatchPlayer`
+  types). `party/src/matchRoom.ts` tracks spectator connections via a role flag on `ConnState`;
+  the security-critical redaction logic lives in the new `spectator.ts` (`canBecomeSpectator`,
+  `viewFor`, `countSpectators` — unit-tested). `party/src/lobby.ts` gained an in-memory live-match
+  registry (new `liveMatches.ts`: `registerStart`/`registerEnd`/`listLive`, unit-tested,
+  self-healing stale-entry sweep) that `MatchRoom` reports to on match start/end. Client: `GameScreen`
+  reuses one component for both roles via a `spectator?: boolean` prop; new `LiveTablesCard` module
+  in the Arena's lower row; `App.tsx`'s match state gained an optional `spectator` flag threaded
+  through `Home` → `LobbyScreen` → `GameScreen`, preserving Unit 9's lazy/Suspense/PageTransition
+  structure unchanged. Verified via a scripted `wrangler dev` integration check (2 players + 1
+  spectator) rather than a live two-browser session (blocked in this environment: even on
+  `localhost`, reaching a signed-in session still requires real Supabase auth, and email
+  confirmation is ON) — deferred to the user to do manually after deploy. Also fixed, in this unit:
+  a real seat-layout bug (the 6-max position arrays put 3 seats on the left and only 2 on the
+  right — `Table.tsx` now uses a symmetric hexagon) and the `client/.env`/`​.env.example`
+  `VITE_PARTYKIT_HOST` port (see Deployment above). Root `npm test` is now 245 tests (224 + 21 new:
+  spectator protocol round-trips, `spectator.ts`/`liveMatches.ts` pure-logic suites,
+  `matchReducer`/`lobbyReducer` coverage for the new messages).
+
+**Not yet done / next:** Further bundle splitting (`manualChunks` for
 `motion`/`radix-ui`/`@supabase/supabase-js`) would be needed to clear the 500 kB chunk-size warning
-entirely.
+entirely. The Unit 10 manual two-browser spectate check (real Supabase accounts, post-deploy) is
+still owed.
 
 ## Working practice
 
