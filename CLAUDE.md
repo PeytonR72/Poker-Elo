@@ -53,7 +53,8 @@ No-Limit Hold'em, timed match. This repo is an npm-workspaces TS monorepo.
 | `engine/reducer.ts` | `applyAction` |
 | `engine/selectors.ts` | `redactFor`, `PublicSeat`, `PublicView` |
 | `elo/pairwise.ts` | `pairwiseElo`, `EloPlayer`, `rankForRating` — **Note:** `pairwiseElo` deltas are NOT zero-sum when K differs between players (provisional vs normal). The persistence layer must apply each player's delta independently, not assume a balanced ledger. |
-| `bots/policy.ts` | `decide` |
+| `bots/policy.ts` | `decide(view, hole, mask, rng, persona?)` — `persona` defaults to `GRINDER_GREG`, reproducing the original fixed tight-aggressive numbers |
+| `bots/personalities.ts` | `BotPersona`, `BOT_PERSONALITIES` (8 named styles — see below), `GRINDER_GREG` (baseline), `assignPersonas(count, rng)`, `makeBotSeatId(seatIndex, persona)`, `personaForSeatId(id)` |
 
 All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 
@@ -63,7 +64,7 @@ All of the above are re-exported from `shared/src/index.ts` (the public barrel).
 |---|---|
 | `matchRoom.ts` | `MatchRoom` — `partyserver` `Server<Env>` Durable Object (the `MAIN` binding); full game loop, timers, ELO, report-match, **roster provisioning** (`onRequest` POST `{ format, humanIds, humanRatings? }`), roster-aware start + bot-fill, `matchInfo` broadcast, **spectator role** (see `spectator.ts`), reports match start/end to the lobby's live-match registry (best-effort `onRequest` POST to `LOBBY`) |
 | `lobby.ts` | `Lobby` — `partyserver` `Server<Env>` Durable Object (the `LOBBY` binding); queue, `QUEUE_MATCH_INTERVAL_MS` ticker, provisions a `MatchRoom` via `getServerByName(this.env.MAIN, roomId)`, sends `queueStatus`/`matchFound`; **live-match registry** (see `liveMatches.ts`) — `onRequest` accepts `MatchRoom`'s start/end reports, `liveMatches` client message answers with the current list |
-| `matchmaker.ts` | `formMatches(waiters, now, onlineCount)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch` |
+| `matchmaker.ts` | `formMatches(waiters, now)` — pure expanding-rating-window grouping + bot-fill; `botFillEtaSec`; types `Waiter`, `FormedMatch`. Bot-fill eligibility is *only* `now - seed.enqueuedAt >= BOT_FILL_WAIT_MS` — there is no online-count short-circuit (a prior bug passed `waiters.size` as `onlineCount` and compared it to `RANKED_MIN_ONLINE`, so a lone queued player always beat the threshold and matched in one ~3s tick instead of waiting the intended 20s). `RANKED_MIN_ONLINE` is unused by the matchmaker as a result but stays exported from `constants.ts`. |
 | `spectator.ts` | `canBecomeSpectator`, `viewFor`, `countSpectators` — pure spectator decision logic, unit-tested (see `spectator.test.ts`); `viewFor` is the security boundary: spectators always get `redactFor(null, …)`, never a seat-holder's view |
 | `liveMatches.ts` | `registerStart`, `registerEnd`, `listLive`, `LIVE_MATCH_STALE_MARGIN_MS` — pure in-memory live-match registry (roomId → entry), unit-tested; `listLive` self-heals by sweeping expired entries on read |
 | `auth.ts` | `verifyJwt(token, { secret?, supabaseUrl?, jwks? })` — dispatches on the JWT's own `alg` header: `HS256` verifies against `secret` (legacy Supabase projects), anything else (e.g. `ES256`) verifies against `jwks` if provided (test injection point), else `${supabaseUrl}/auth/v1/.well-known/jwks.json`. `parseDevToken("dev:<id>")` |
@@ -84,6 +85,20 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
 - `timebankUsed` is broadcast BEFORE `yourTurn` so the client can update the clock first.
 - `pairwiseElo` deltas are applied independently per player (not assumed zero-sum).
 - CSPRNG seed: `crypto.getRandomValues(new Uint32Array(4))` XOR-folded to 32-bit.
+- **Bot personalities:** `matchRoom.ts`'s `startMatch()` assigns each bot seat a distinct
+  `BotPersona` (`shared/src/bots/personalities.ts`, `assignPersonas`) via a CSPRNG-seeded shuffle,
+  and ids bot seats `bot-<seatIndex>-<personaId>` (`makeBotSeatId`) instead of the old bare
+  `bot-<i>`. `startsWith("bot-")` checks elsewhere (report-match filtering, `seatRngs` derivation,
+  the client's `displayName`/`usePlayerNames`) still match the new format unchanged.
+  `botRunner.decideBotAction` resolves the persona from the seat id (`personaForSeatId`, falls
+  back to the baseline `GRINDER_GREG` for an unrecognized/legacy id) and passes it into
+  `decide()`. Every persona is a set of frequencies/thresholds/multipliers layered onto the same
+  decision tree — nothing routes on a hardcoded always/never branch, so no two hands with the same
+  bot play out identically. Roster: Grinder Greg (baseline TAG), Crazy Mike (maniac — 3-bets/opens
+  very wide and large), Nit Nancy (rock — premium-only), Calling Station Stan (rarely raises, calls
+  down ~70%), Shovey Chad (push/fold from 25bb, not just the standard 12bb), Passive Pete
+  (rarely bets/raises, mild calling), Tricky Rick (frequent postflop bluffs), Loose Lucy (wide
+  preflop opens, weak-tight postflop).
 - A provisioned room only admits invited humans (`not_invited` otherwise); the grace timer
   (`DISCONNECT_GRACE_MS`) bot-fills missing humans but does **not** start an all-bot match (zero
   humans seated → room stays idle). `makeRoomCode` uses `Math.random` (room codes are not
@@ -132,7 +147,7 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
 | `game/viewHelpers.ts` | **pure** `maskToButtons`, `clampRaiseTo` (raise-TO), `blindLevelLabel`, `formatCard`, `formatChips` — tested |
 | `game/useMatchSocket.ts` | connects to `main` room, `hello` (with an optional `spectate` flag) + `sendAction` |
 | `game/*.tsx` | `GameScreen` (`spectator?: boolean` prop — hides the action bar/waiting strip entirely, shows a SPECTATING pill + count, never renders hero hole cards), `Table` (felt, symmetric 6-max hexagon layout), `SeatView`, `Board`, `CardView`, `ActionBar`, `MatchClock`, `MatchOver` |
-| `data/displayName.ts` | `displayName` — player label (bot glyph / username / `player_<8>`) |
+| `data/displayName.ts` | `displayName` — player label (bot glyph + persona name via `personaForSeatId` / username / `player_<8>`) |
 | `data/leaderboard.ts` | `ProfileRow`, `LeaderboardEntry`, `Leaderboard`, `buildLeaderboard` |
 | `data/profile.ts` | `MatchResultRow`, `ProfileHeader`, `ProfileHistoryEntry`, `ProfileData`, `buildProfile` |
 | `home/Home.tsx` | `Home` — tabbed shell (Play/Leaderboard/Profile) + rating badge header |
@@ -269,6 +284,16 @@ with the Worker entrypoint at `worker.ts`. `partykit`/`partykit.json` are gone f
 `motion`/`radix-ui`/`@supabase/supabase-js`) would be needed to clear the 500 kB chunk-size warning
 entirely. The Unit 10 manual two-browser spectate check (real Supabase accounts, post-deploy) is
 still owed.
+
+**Post-Unit-10 fixes/polish:** Fixed a real matchmaking bug where a lone queued player matched in
+one ~3s tick instead of the intended 20s bot-fill wait (`onlineCount` short-circuit in
+`matchmaker.ts` — see `party/src` module map above); `formMatches` dropped the `onlineCount`
+parameter. Enlarged the playing-card corner index (rank/suit) in `playing-card.tsx` and the hero's
+own hole-card footprint in `SeatView.tsx` for readability, verified visually via a local
+`wrangler dev` + `vite` Playwright session (desktop and 390px-compact). Added bot personalities
+(`shared/src/bots/personalities.ts`, 8 named playing styles) — see the `party/src` module map
+above for the full rundown; verified end-to-end in the same Playwright session (distinct persona
+names/styles appearing at a live bot-filled table).
 
 ## Working practice
 

@@ -27,6 +27,8 @@ import {
   BOT_DECISION_DELAY_MAX_MS,
   mulberry32,
   deriveSeed,
+  assignPersonas,
+  makeBotSeatId,
 } from "@poker/shared";
 import type { TableState, PublicView, Action, ActionMask, Seat, EloPlayer } from "@poker/shared";
 import { verifyJwt, parseDevToken } from "./auth.js";
@@ -476,10 +478,13 @@ export default class MatchRoom extends Server<Env> {
     const elapsedMs = 0; // first hand
     const { sb, bb } = blindLevelAt(elapsedMs, format);
 
+    const botSeatCount = TABLE_SIZE - [...this.players.values()].filter((p) => p.seatIndex !== null).length;
+    const personas = assignPersonas(botSeatCount, mulberry32(csprngSeed()));
+    let personaCursor = 0;
     const seats = Array.from({ length: TABLE_SIZE }, (_, i) => {
       const player = [...this.players.values()].find((p) => p.seatIndex === i);
-      const id = player?.playerId ?? `bot-${i}`;
       const isBot = !player;
+      const id = player?.playerId ?? makeBotSeatId(i, personas[personaCursor++]!);
       return createSeat(id, isBot, STARTING_STACK);
     });
 
@@ -654,7 +659,7 @@ export default class MatchRoom extends Server<Env> {
     const rng = this.seatRngs[seatIdx] ?? mulberry32(0);
     const view = redactFor(seat.id, this.tableState);
     const mask = legalActions(this.tableState, seatIdx);
-    const action = decideBotAction(view, seat.holeCards, mask, rng);
+    const action = decideBotAction(view, seat.holeCards, mask, rng, seat.id);
     const { state, events } = applyAction(this.tableState, action);
     this.tableState = state;
     for (const event of events) this.broadcast(encode({ t: "event", event }));

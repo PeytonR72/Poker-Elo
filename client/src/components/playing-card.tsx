@@ -32,8 +32,9 @@ export interface PlayingCardProps {
 
 const VB_W = 100;
 const VB_H = 140;
-// Central pip band (below the top index, above the bottom index).
-const BAND_TOP = 30;
+// Central pip band (below the top index, above the bottom index). Pushed down
+// from the enlarged corner index so pips never collide with it.
+const BAND_TOP = 48;
 const BAND_BOT = 110;
 
 /**
@@ -79,17 +80,17 @@ function CornerIndex({ rank, suit, fill }: { rank: Rank; suit: Suit; fill: strin
   return (
     <g>
       <text
-        x={11}
-        y={20}
+        x={14}
+        y={27}
         fontFamily='"Space Grotesk", system-ui, sans-serif'
-        fontSize={18}
+        fontSize={26}
         fontWeight={700}
         textAnchor="middle"
         fill={fill}
       >
         {rankLabel(rank)}
       </text>
-      <Glyph suit={suit} cx={11} cy={30} size={11} fill={fill} />
+      <Glyph suit={suit} cx={14} cy={41} size={16} fill={fill} />
     </g>
   );
 }

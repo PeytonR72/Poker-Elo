@@ -17,3 +17,4 @@ export * from "./engine/reducer.js";
 export * from "./engine/selectors.js";
 export * from "./elo/pairwise.js";
 export * from "./bots/policy.js";
+export * from "./bots/personalities.js";

@@ -74,9 +74,11 @@ export default function SeatView({
   // Hero's face-up cards are noticeably larger than opponent backs on desktop
   // so your own hand is instantly readable; compact keeps one size to fit 390px.
   const cardSize = compact
-    ? "h-[2.6rem] w-[1.85rem]"
+    ? isOwn
+      ? "h-[3.4rem] w-[2.4rem]"
+      : "h-[2.6rem] w-[1.85rem]"
     : isOwn
-      ? "h-[4.6rem] w-[3.3rem]"
+      ? "h-[6rem] w-[4.3rem]"
       : "h-[3.2rem] w-[2.3rem]";
   const podWidth = compact ? "w-[92px]" : "w-[132px]";
 

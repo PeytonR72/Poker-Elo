@@ -176,8 +176,7 @@ export default class Lobby extends Server<Env> {
   async runMatchTick(): Promise<void> {
     if (this.waiters.size === 0) return;
     const now = Date.now();
-    const onlineCount = this.waiters.size;
-    const { matches } = formMatches([...this.waiters.values()], now, onlineCount);
+    const { matches } = formMatches([...this.waiters.values()], now);
     const provisioned = new Set<string>();
 
     for (const match of matches) {

@@ -3,13 +3,20 @@ import { rankOf, suitOf, type Card } from "../cards.js";
 import type { ActionMask } from "../engine/legalActions.js";
 import type { PublicView } from "../engine/selectors.js";
 import type { Action } from "../engine/types.js";
+import { GRINDER_GREG, type BotPersona } from "./personalities.js";
 
-/** Pure tight-aggressive bot. Consumes only public info + its own hole cards. */
+/**
+ * Pure bot policy. Consumes only public info + its own hole cards. The persona
+ * parameterizes every branch's frequency/threshold/sizing so different bots route
+ * through the same decision tree differently (see `personalities.ts`); the default
+ * persona (Grinder Greg) reproduces the original fixed tight-aggressive numbers.
+ */
 export function decide(
   view: PublicView,
   hole: [Card, Card],
   mask: ActionMask,
   rng: () => number,
+  persona: BotPersona = GRINDER_GREG,
 ): Action {
   const me = view.seats[mask.seat]!;
   const bb = view.bb;
@@ -18,33 +25,39 @@ export function decide(
 
   // ── Preflop ──────────────────────────────────────────────────────────────
   if (view.board.length === 0) {
-    const tier = preflopTier(hole);
+    const tier = clampTier(preflopTier(hole) + persona.tierBoost);
 
-    // Short-stack push/fold: no limping when <= 12 BB
-    if (stackBB <= 12) {
+    // Short-stack push/fold: no limping under the persona's jam threshold
+    if (stackBB <= persona.jamThresholdBB) {
       return tier >= 2 ? raiseTo(mask, mask.maxRaiseTo) : foldOrCheck(mask);
     }
 
     if (tier === 4) {
       // Premium: 4-bet/jam, never fold preflop
-      return raiseTo(mask, view.currentBet + bb * 4);
+      return raiseTo(mask, view.currentBet + bb * 4 * persona.sizeMult);
     }
     if (tier === 3) {
       // Strong: 3-bet, call reraises
       if (mask.callAmount === 0) {
-        return rng() < 0.7 ? raiseTo(mask, bb * 3) : callOrCheck(mask);
+        return rng() < persona.raiseFreqTier3 ? raiseTo(mask, bb * 3 * persona.sizeMult) : callOrCheck(mask);
       }
-      return mask.callAmount <= bb * 6 ? raiseTo(mask, view.currentBet + bb * 3) : callOrCheck(mask);
+      return mask.callAmount <= bb * persona.callToleranceTier3BB
+        ? raiseTo(mask, view.currentBet + bb * 3 * persona.sizeMult)
+        : callOrCheck(mask);
     }
     if (tier === 2) {
       // Good: raise or call, fold to big 3-bets
-      if (mask.callAmount === 0) return raiseTo(mask, bb * 3);
-      return mask.callAmount <= bb * 4 ? callOrCheck(mask) : foldOrCheck(mask);
+      if (mask.callAmount === 0) {
+        return rng() < persona.raiseFreqTier2 ? raiseTo(mask, bb * 3 * persona.sizeMult) : callOrCheck(mask);
+      }
+      return mask.callAmount <= bb * persona.foldThresholdTier2BB ? callOrCheck(mask) : foldOrCheck(mask);
     }
     if (tier === 1) {
       // Playable: call raises, fold to 3-bets
-      if (mask.callAmount === 0) return rng() < 0.18 ? raiseTo(mask, bb * 3) : callOrCheck(mask);
-      return mask.callAmount <= bb * 3 ? callOrCheck(mask) : foldOrCheck(mask);
+      if (mask.callAmount === 0) {
+        return rng() < persona.raiseFreqTier1 ? raiseTo(mask, bb * 3 * persona.sizeMult) : callOrCheck(mask);
+      }
+      return mask.callAmount <= bb * persona.callThresholdTier1BB ? callOrCheck(mask) : foldOrCheck(mask);
     }
     // Tier 0 (trash): fold if facing a raise, check otherwise
     return foldOrCheck(mask);
@@ -56,31 +69,45 @@ export function decide(
 
   if (cat >= HandCategory.Trips) {
     // Trips or better: bet/raise strongly
-    const betSize = Math.round(pot * 0.75);
+    const betSize = Math.round(pot * 0.75 * persona.sizeMult);
     return raiseTo(mask, view.currentBet + betSize + bb);
   }
 
   if (cat === HandCategory.TwoPair) {
     // Two pair: bet/call moderate
-    if (mask.callAmount === 0) return raiseTo(mask, view.currentBet + Math.round(pot * 0.5) + bb);
+    if (mask.callAmount === 0) {
+      return raiseTo(mask, view.currentBet + Math.round(pot * 0.5 * persona.sizeMult) + bb);
+    }
     const potOdds = mask.callAmount / Math.max(1, pot + mask.callAmount);
     return potOdds < 0.5 ? callOrCheck(mask) : foldOrCheck(mask);
   }
 
   if (cat === HandCategory.Pair) {
     // Pair: call moderate bets, fold to large ones
-    if (mask.callAmount === 0) return rng() < 0.25 ? raiseTo(mask, view.currentBet + Math.round(pot * 0.4) + bb) : callOrCheck(mask);
+    if (mask.callAmount === 0) {
+      return rng() < persona.betFreqPair
+        ? raiseTo(mask, view.currentBet + Math.round(pot * 0.4 * persona.sizeMult) + bb)
+        : callOrCheck(mask);
+    }
     const potOdds = mask.callAmount / Math.max(1, pot + mask.callAmount);
     if (potOdds < 0.35) return callOrCheck(mask);
-    return rng() < 0.1 ? callOrCheck(mask) : foldOrCheck(mask);
+    return rng() < persona.callDownFreq ? callOrCheck(mask) : foldOrCheck(mask);
   }
 
   // Weak/no made hand (HighCard): check/fold, occasional bluff
-  if (mask.callAmount === 0) return rng() < 0.12 ? raiseTo(mask, view.currentBet + Math.round(pot * 0.4) + bb) : foldOrCheck(mask);
+  if (mask.callAmount === 0) {
+    return rng() < persona.bluffFreq
+      ? raiseTo(mask, view.currentBet + Math.round(pot * 0.4 * persona.sizeMult) + bb)
+      : foldOrCheck(mask);
+  }
   return foldOrCheck(mask);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+function clampTier(tier: number): number {
+  return Math.max(0, Math.min(4, tier));
+}
 
 function potSize(view: PublicView): number {
   let p = 0;

@@ -1,4 +1,4 @@
-import { decide, mulberry32, deriveSeed } from "@poker/shared";
+import { decide, mulberry32, deriveSeed, personaForSeatId } from "@poker/shared";
 import type { PublicView, ActionMask, Action } from "@poker/shared";
 
 export function decideBotAction(
@@ -6,8 +6,9 @@ export function decideBotAction(
   holeCards: [number, number],
   mask: ActionMask,
   rng: () => number,
+  seatId: string,
 ): Action {
-  return decide(view, holeCards, mask, rng);
+  return decide(view, holeCards, mask, rng, personaForSeatId(seatId));
 }
 
 export function botThinkDelayMs(rng: () => number, minMs: number, maxMs: number): number {
